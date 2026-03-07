@@ -1,15 +1,20 @@
 # Tahini Sidecar — Server container (SGX + delegated TLS)
 #
-# Builds:  tahini sidecar, fizz-sidecar (credential generator), RPC server
+# Builds:  tahini sidecar (C, Bazel)
+# Downloads: fizz-sidecar and rpc-server from GitHub Releases
 # Runtime: generates DC, runs sidecar which launches the RPC server
 
 ARG SGX_MODE=SIM
 ARG AZURE=0
+ARG FIZZ_RELEASE_TAG=fizz-latest
+ARG GITHUB_REPO=jadidbourbaki/tahini-sidecar
 
 FROM ubuntu:22.04
 
 ARG SGX_MODE
 ARG AZURE
+ARG FIZZ_RELEASE_TAG
+ARG GITHUB_REPO
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -62,43 +67,18 @@ ENV PKG_CONFIG_PATH=$SGX_SDK/pkgconfig
 ENV LD_LIBRARY_PATH=$SGX_SDK/sdk_libs
 ENV SGX_MODE=${SGX_MODE}
 
-# fizz_rs system dependencies (fizz + folly build from source via build.rs)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    cmake \
-    pkg-config \
-    libsodium-dev \
-    libevent-dev \
-    libdouble-conversion-dev \
-    libgflags-dev \
-    libgoogle-glog-dev \
-    libiberty-dev \
-    liblz4-dev \
-    libzstd-dev \
-    libsnappy-dev \
-    libbz2-dev \
-    liblzma-dev \
-    libunwind-dev \
-    libdwarf-dev \
-    libelf-dev \
-    libaio-dev \
-    libboost-all-dev \
-    autoconf \
-    automake \
-    libtool \
-    && rm -rf /var/lib/apt/lists/*
-
-# Rust toolchain
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-ENV PATH="/root/.cargo/bin:${PATH}"
-
 # sidecar-owners group
 RUN groupadd sidecar-owners && usermod -aG sidecar-owners root
 
-# Non-root user for fizz-sidecar build (rules_python refuses to run as root)
-RUN useradd -m builder
-
 RUN echo 'source $SGX_SDK/environment' >> /root/.bashrc
+
+# Download pre-built fizz binaries from GitHub Releases
+RUN wget -qO /usr/local/bin/fizz-sidecar \
+      "https://github.com/${GITHUB_REPO}/releases/download/${FIZZ_RELEASE_TAG}/fizz-sidecar" && \
+    chmod +x /usr/local/bin/fizz-sidecar
+RUN wget -qO /usr/local/bin/rpc-server \
+      "https://github.com/${GITHUB_REPO}/releases/download/${FIZZ_RELEASE_TAG}/rpc-server" && \
+    chmod +x /usr/local/bin/rpc-server
 
 # --- Build stage ---
 WORKDIR /workspace
@@ -107,21 +87,6 @@ COPY . .
 # Build the tahini sidecar (C, Bazel)
 RUN --mount=type=cache,target=/root/.cache/bazel \
     . $SGX_SDK/environment && bazel build //:sidecar_bin //:enclave_signed
-
-# Build fizz-sidecar (C++, Bazel) for delegated credential generation
-# rules_python refuses to run as root, so we use a non-root user for this step.
-# fizz.crt/fizz.key are runtime artifacts but listed as BUILD data deps; create placeholders.
-RUN touch third_party/fizz-rs/demo/fizz-sidecar/fizz.crt \
-          third_party/fizz-rs/demo/fizz-sidecar/fizz.key && \
-    chown -R builder:builder third_party/fizz-rs/demo/fizz-sidecar && \
-    cd third_party/fizz-rs/demo/fizz-sidecar && \
-    HOME=/home/builder runuser -u builder -- bazel build :sidecar
-
-# Build RPC server (Rust, cargo)
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/workspace/examples/rpc-server/target \
-    cd examples/rpc-server && cargo build --release && \
-    cp target/release/rpc-server /usr/local/bin/rpc-server
 
 # Copy entrypoint
 COPY scripts/server-entrypoint.sh /usr/local/bin/server-entrypoint.sh

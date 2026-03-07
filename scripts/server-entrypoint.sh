@@ -21,7 +21,7 @@ fi
 # Step 2: run fizz-sidecar to generate delegated credential
 # The C++ binary writes to /tmp/fizz_server.json and /tmp/fizz_client.json
 echo "[server-entrypoint] generating delegated credential..."
-(cd third_party/fizz-rs/demo/fizz-sidecar && ./bazel-bin/sidecar/main)
+/usr/local/bin/fizz-sidecar
 
 # Step 3: copy artifacts to shared volume
 echo "[server-entrypoint] publishing credential artifacts to $SHARED_DIR..."

@@ -1,64 +1,27 @@
 # Tahini Sidecar — Client container (delegated TLS verification)
 #
-# Builds:  RPC client with fizz_rs for DC-verified TLS
+# Downloads: rpc-client from GitHub Releases
 # Runtime: connects to the server container over the Docker network
+
+ARG FIZZ_RELEASE_TAG=fizz-latest
+ARG GITHUB_REPO=jadidbourbaki/tahini-sidecar
 
 FROM ubuntu:22.04
 
+ARG FIZZ_RELEASE_TAG
+ARG GITHUB_REPO
+
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Core build tools
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    wget \
-    libssl-dev \
-    gnupg \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-# fizz_rs system dependencies (fizz + folly build from source via build.rs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    cmake \
-    pkg-config \
-    libsodium-dev \
-    libevent-dev \
-    libdouble-conversion-dev \
-    libgflags-dev \
-    libgoogle-glog-dev \
-    libiberty-dev \
-    liblz4-dev \
-    libzstd-dev \
-    libsnappy-dev \
-    libbz2-dev \
-    liblzma-dev \
-    libunwind-dev \
-    libdwarf-dev \
-    libelf-dev \
-    libaio-dev \
-    libboost-all-dev \
-    autoconf \
-    automake \
-    libtool \
+    ca-certificates \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Rust toolchain
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# --- Build stage ---
-WORKDIR /workspace
-
-# Copy fizz-rs submodule and client source
-COPY third_party/fizz-rs third_party/fizz-rs
-COPY examples/rpc-client examples/rpc-client
-
-# Build RPC client
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/workspace/examples/rpc-client/target \
-    cd examples/rpc-client && cargo build --release && \
-    cp target/release/rpc-client /usr/local/bin/rpc-client
+# Download pre-built rpc-client from GitHub Releases
+RUN wget -qO /usr/local/bin/rpc-client \
+      "https://github.com/${GITHUB_REPO}/releases/download/${FIZZ_RELEASE_TAG}/rpc-client" && \
+    chmod +x /usr/local/bin/rpc-client
 
 # Copy entrypoint
 COPY scripts/client-entrypoint.sh /usr/local/bin/client-entrypoint.sh

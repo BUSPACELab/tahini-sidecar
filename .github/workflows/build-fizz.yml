@@ -1,0 +1,153 @@
+name: Build Fizz Binaries
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'third_party/fizz-rs/**'
+      - 'examples/rpc-server/**'
+      - 'examples/rpc-client/**'
+      - '.github/workflows/build-fizz.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: fizz-latest
+
+jobs:
+  fizz-sidecar:
+    name: Build fizz-sidecar (C++, Bazel)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            build-essential wget libssl-dev curl git python3 cmake pkg-config \
+            libsodium-dev libevent-dev libdouble-conversion-dev libgflags-dev \
+            libgoogle-glog-dev libiberty-dev liblz4-dev libzstd-dev libsnappy-dev \
+            libbz2-dev liblzma-dev libunwind-dev libdwarf-dev libelf-dev libaio-dev \
+            libboost-all-dev autoconf automake libtool
+
+      - name: Install Bazelisk
+        run: |
+          wget -qO /usr/local/bin/bazel \
+            https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+          chmod +x /usr/local/bin/bazel
+
+      - name: Create placeholder cert files
+        run: |
+          touch third_party/fizz-rs/demo/fizz-sidecar/fizz.crt \
+                third_party/fizz-rs/demo/fizz-sidecar/fizz.key
+
+      - name: Build fizz-sidecar
+        run: cd third_party/fizz-rs/demo/fizz-sidecar && bazel build :sidecar
+
+      - name: Package binary
+        run: |
+          cp third_party/fizz-rs/demo/fizz-sidecar/bazel-bin/sidecar/main fizz-sidecar
+          chmod +x fizz-sidecar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fizz-sidecar
+          path: fizz-sidecar
+
+  rpc-server:
+    name: Build rpc-server (Rust)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            build-essential wget libssl-dev curl git python3 cmake pkg-config \
+            libsodium-dev libevent-dev libdouble-conversion-dev libgflags-dev \
+            libgoogle-glog-dev libiberty-dev liblz4-dev libzstd-dev libsnappy-dev \
+            libbz2-dev liblzma-dev libunwind-dev libdwarf-dev libelf-dev libaio-dev \
+            libboost-all-dev autoconf automake libtool
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build rpc-server
+        run: cd examples/rpc-server && cargo build --release
+
+      - name: Package binary
+        run: |
+          cp examples/rpc-server/target/release/rpc-server rpc-server
+          chmod +x rpc-server
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpc-server
+          path: rpc-server
+
+  rpc-client:
+    name: Build rpc-client (Rust)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            build-essential wget libssl-dev curl git python3 cmake pkg-config \
+            libsodium-dev libevent-dev libdouble-conversion-dev libgflags-dev \
+            libgoogle-glog-dev libiberty-dev liblz4-dev libzstd-dev libsnappy-dev \
+            libbz2-dev liblzma-dev libunwind-dev libdwarf-dev libelf-dev libaio-dev \
+            libboost-all-dev autoconf automake libtool
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build rpc-client
+        run: cd examples/rpc-client && cargo build --release
+
+      - name: Package binary
+        run: |
+          cp examples/rpc-client/target/release/rpc-client rpc-client
+          chmod +x rpc-client
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpc-client
+          path: rpc-client
+
+  release:
+    name: Upload to GitHub Release
+    needs: [fizz-sidecar, rpc-server, rpc-client]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Delete existing release if it exists (idempotent update)
+          gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
+          git tag -d "$RELEASE_TAG" 2>/dev/null || true
+          gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/${RELEASE_TAG}" 2>/dev/null || true
+
+          gh release create "$RELEASE_TAG" \
+            --title "Fizz Pre-built Binaries" \
+            --notes "Auto-built fizz-sidecar, rpc-server, and rpc-client binaries for Docker images." \
+            --prerelease \
+            artifacts/fizz-sidecar \
+            artifacts/rpc-server \
+            artifacts/rpc-client
