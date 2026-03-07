@@ -74,12 +74,14 @@ jobs:
             libgoogle-glog-dev libiberty-dev liblz4-dev libzstd-dev libsnappy-dev \
             libbz2-dev liblzma-dev libunwind-dev libdwarf-dev libelf-dev libaio-dev \
             libboost-all-dev autoconf automake libtool
+          cd third_party/fizz-rs/third_party/fizz && \
+            sudo python3 build/fbcode_builder/getdeps.py --allow-system-packages install-system-deps --recursive fizz
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build rpc-server
-        run: cd examples/rpc-server && cargo build --release
+        run: cd examples/rpc-server && cargo build --release || (cat /tmp/fizz.log 2>/dev/null; exit 1)
 
       - name: Package binary
         run: |
@@ -107,12 +109,14 @@ jobs:
             libgoogle-glog-dev libiberty-dev liblz4-dev libzstd-dev libsnappy-dev \
             libbz2-dev liblzma-dev libunwind-dev libdwarf-dev libelf-dev libaio-dev \
             libboost-all-dev autoconf automake libtool
+          cd third_party/fizz-rs/third_party/fizz && \
+            sudo python3 build/fbcode_builder/getdeps.py --allow-system-packages install-system-deps --recursive fizz
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build rpc-client
-        run: cd examples/rpc-client && cargo build --release
+        run: cd examples/rpc-client && cargo build --release || (cat /tmp/fizz.log 2>/dev/null; exit 1)
 
       - name: Package binary
         run: |
