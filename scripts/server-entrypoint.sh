@@ -44,5 +44,6 @@ exec ./bazel-bin/sidecar \
     --tahini-dc "$SHARED_DIR/fizz_server.json" \
     --tahini-dc-cert "$SHARED_DIR/fizz.crt" \
     --tahini-dc-sig "$SHARED_DIR/fizz_client.json" \
+    --tahini-quote-out "$SHARED_DIR/attestation.json" \
     /usr/local/bin/rpc-server \
     --port 8443

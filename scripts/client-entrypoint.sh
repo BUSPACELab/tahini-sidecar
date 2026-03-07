@@ -29,6 +29,7 @@ sleep 5
 echo "[client-entrypoint] connecting to $SERVER_ADDR with delegated TLS..."
 
 exec /usr/local/bin/rpc-client \
+    --attestation "$SHARED_DIR/attestation.json" \
     --dc-sig "$SHARED_DIR/fizz_client.json" \
     --dc-cert "$SHARED_DIR/fizz.crt" \
     --server "$SERVER_ADDR"

@@ -8,6 +8,7 @@ name = "rpc-server"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 fizz_rs = { path = "../../third_party/fizz-rs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

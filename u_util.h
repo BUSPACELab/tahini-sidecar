@@ -51,4 +51,12 @@ void bin_to_hex(const uint8_t* bin, size_t len, char* hex);
 // Returns 0 on success, -1 on failure.
 int dump_file_to_stream(const char* path, FILE* stream);
 
+// write_attestation_json writes attestation artifacts as JSON to the given path.
+// The JSON contains base64url-encoded quote, hex binary hash, and hex public key.
+// Returns 0 on success, -1 on failure.
+int write_attestation_json(const char* path,
+                           const uint8_t* quote, uint32_t quote_size,
+                           const uint8_t* binary_hash, size_t hash_size,
+                           const uint8_t* public_key, size_t pubkey_size);
+
 #endif /* TAHINI_U_UTIL_H */

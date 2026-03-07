@@ -8,9 +8,13 @@ name = "rpc-client"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
 fizz_rs = { path = "../../third_party/fizz-rs" }
+reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tokio = { version = "1", features = [
     "macros",
     "rt-multi-thread",

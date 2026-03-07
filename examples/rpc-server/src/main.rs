@@ -1,7 +1,6 @@
-use std::env;
 use std::fs::File;
-use std::process;
 
+use clap::Parser;
 use fizz_rs::{CertificatePublic, DelegatedCredentialData, ServerTlsContext};
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -14,62 +13,29 @@ struct ServerCredentialJson {
     credentialPEM: String,
 }
 
+#[derive(Parser)]
+#[command(about = "Tahini RPC server — listens with delegated TLS credentials")]
 struct Args {
+    /// Tahini secret key (hex, injected by sidecar)
+    #[arg(long = "tahini-secret")]
     secret: String,
+
+    /// Path to server delegated credential JSON
+    #[arg(long = "tahini-dc")]
     dc_path: String,
+
+    /// Path to parent TLS certificate
+    #[arg(long = "tahini-dc-cert")]
     cert_path: String,
+
+    /// Port to listen on
+    #[arg(long, default_value_t = 8443)]
     port: u16,
-}
-
-fn parse_args() -> Args {
-    let argv: Vec<String> = env::args().collect();
-    let mut secret = None;
-    let mut dc_path = None;
-    let mut cert_path = None;
-    let mut port: u16 = 8443;
-
-    let mut i = 1;
-    while i < argv.len() {
-        match argv[i].as_str() {
-            "--tahini-secret" if i + 1 < argv.len() => {
-                secret = Some(argv[i + 1].clone());
-                i += 2;
-            }
-            "--tahini-dc" if i + 1 < argv.len() => {
-                dc_path = Some(argv[i + 1].clone());
-                i += 2;
-            }
-            "--tahini-dc-cert" if i + 1 < argv.len() => {
-                cert_path = Some(argv[i + 1].clone());
-                i += 2;
-            }
-            "--port" if i + 1 < argv.len() => {
-                port = argv[i + 1].parse().unwrap_or(8443);
-                i += 2;
-            }
-            _ => { i += 1; }
-        }
-    }
-
-    let secret = secret.unwrap_or_else(|| {
-        eprintln!("error: --tahini-secret is required");
-        process::exit(1);
-    });
-    let dc_path = dc_path.unwrap_or_else(|| {
-        eprintln!("error: --tahini-dc is required");
-        process::exit(1);
-    });
-    let cert_path = cert_path.unwrap_or_else(|| {
-        eprintln!("error: --tahini-dc-cert is required");
-        process::exit(1);
-    });
-
-    Args { secret, dc_path, cert_path, port }
 }
 
 #[tokio::main]
 async fn main() {
-    let args = parse_args();
+    let args = Args::parse();
 
     if args.secret.len() >= 16 {
         eprintln!("[rpc-server] tahini secret: {}...{}", &args.secret[..8], &args.secret[args.secret.len()-8..]);

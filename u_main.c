@@ -19,7 +19,8 @@ static void usage(const char* prog) {
         "options:\n"
         "  --tahini-dc <path>       server delegated credential JSON\n"
         "  --tahini-dc-cert <path>  parent TLS certificate (public)\n"
-        "  --tahini-dc-sig <path>   client verification info JSON\n",
+        "  --tahini-dc-sig <path>   client verification info JSON\n"
+        "  --tahini-quote-out <path> write attestation JSON for client verification\n",
         prog);
 }
 
@@ -27,11 +28,13 @@ int main(int argc, char* argv[]) {
     const char* dc_server_path = NULL;
     const char* dc_cert_path = NULL;
     const char* dc_sig_path = NULL;
+    const char* quote_out_path = NULL;
 
     static struct option long_options[] = {
-        {"tahini-dc",      required_argument, NULL, 'd'},
-        {"tahini-dc-cert", required_argument, NULL, 'c'},
-        {"tahini-dc-sig",  required_argument, NULL, 's'},
+        {"tahini-dc",        required_argument, NULL, 'd'},
+        {"tahini-dc-cert",   required_argument, NULL, 'c'},
+        {"tahini-dc-sig",    required_argument, NULL, 's'},
+        {"tahini-quote-out", required_argument, NULL, 'q'},
         {NULL, 0, NULL, 0}
     };
 
@@ -42,6 +45,7 @@ int main(int argc, char* argv[]) {
             case 'd': dc_server_path = optarg; break;
             case 'c': dc_cert_path   = optarg; break;
             case 's': dc_sig_path    = optarg; break;
+            case 'q': quote_out_path = optarg; break;
             default:
                 usage(argv[0]);
                 return EXIT_FAILURE;
@@ -134,6 +138,17 @@ int main(int argc, char* argv[]) {
     bin_to_hex(eq.quote, eq.quote_size, quote_hex);
     fprintf(stderr, "tahini quote (%u bytes): %s\n", eq.quote_size, quote_hex);
     free(quote_hex);
+
+    if (quote_out_path) {
+        if (write_attestation_json(quote_out_path, eq.quote, eq.quote_size,
+                                   binary_hash, TAHINI_HASH_SIZE,
+                                   pubkey_out, TAHINI_PUBKEY_SIZE) != 0) {
+            fprintf(stderr, "failed to write attestation JSON to %s\n", quote_out_path);
+            free_enclave_quote(&eq);
+            return EXIT_FAILURE;
+        }
+        fprintf(stderr, "tahini attestation written to %s\n", quote_out_path);
+    }
 
     free_enclave_quote(&eq);
 
