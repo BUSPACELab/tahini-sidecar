@@ -19,20 +19,6 @@ cc_library(
     include_prefix = "fizz_rs/src",
 )
 
-# Pre-generated CXX bridge source.
-# Generated with: cxxbridge third_party/fizz-rs/src/bridge.rs
-cc_library(
-    name = "fizz_rs_bridge",
-    srcs = ["generated/bridge.rs.cc"],
-    linkstatic = True,
-    deps = [
-        ":fizz_rs_bridge_include",
-        ":fizz_rs_ffi_hdrs",
-        ":glog_compat",
-        "@crates//:cxx_cc",
-    ],
-)
-
 # FFI header files (exposed as ffi/*.h).
 cc_library(
     name = "fizz_rs_ffi_hdrs",
@@ -46,14 +32,15 @@ cc_library(
     ],
 )
 
-# C++ FFI implementation — the critical BCR fizz compatibility test.
+# Combined C++ library: CXX bridge + FFI implementation.
+# Merged into one cc_library because the bridge wrappers call FFI functions
+# and vice versa — separate archives cause link-order failures on GNU ld.
 cc_library(
-    name = "fizz_rs_ffi",
-    srcs = glob(["fizz-rs/src/ffi/*.cpp"]),
+    name = "fizz_rs_cc",
+    srcs = glob(["fizz-rs/src/ffi/*.cpp"]) + ["generated/bridge.rs.cc"],
     copts = ["-std=c++17"],
     linkstatic = True,
     deps = [
-        ":fizz_rs_bridge",
         ":fizz_rs_bridge_include",
         ":fizz_rs_ffi_hdrs",
         ":glog_compat",
@@ -70,8 +57,7 @@ rust_library(
     crate_name = "fizz_rs",
     edition = "2021",
     deps = [
-        ":fizz_rs_bridge",
-        ":fizz_rs_ffi",
+        ":fizz_rs_cc",
         "@crates//:bytes",
         "@crates//:cxx",
         "@crates//:serde",
