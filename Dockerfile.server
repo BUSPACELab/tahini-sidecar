@@ -95,6 +95,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # sidecar-owners group
 RUN groupadd sidecar-owners && usermod -aG sidecar-owners root
 
+# Non-root user for fizz-sidecar build (rules_python refuses to run as root)
+RUN useradd -m builder
+
 RUN echo 'source $SGX_SDK/environment' >> /root/.bashrc
 
 # --- Build stage ---
@@ -108,9 +111,7 @@ RUN --mount=type=cache,target=/root/.cache/bazel \
 # Build fizz-sidecar (C++, Bazel) for delegated credential generation
 # rules_python refuses to run as root, so we use a non-root user for this step.
 # fizz.crt/fizz.key are runtime artifacts but listed as BUILD data deps; create placeholders.
-RUN --mount=type=cache,target=/home/builder/.cache/bazel,uid=1000,gid=1000 \
-    useradd -u 1000 -m builder && \
-    touch third_party/fizz-rs/demo/fizz-sidecar/fizz.crt \
+RUN touch third_party/fizz-rs/demo/fizz-sidecar/fizz.crt \
           third_party/fizz-rs/demo/fizz-sidecar/fizz.key && \
     chown -R builder:builder third_party/fizz-rs/demo/fizz-sidecar && \
     cd third_party/fizz-rs/demo/fizz-sidecar && \
