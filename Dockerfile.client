@@ -55,7 +55,10 @@ COPY third_party/fizz-rs third_party/fizz-rs
 COPY examples/rpc-client examples/rpc-client
 
 # Build RPC client
-RUN cd examples/rpc-client && cargo build --release
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/examples/rpc-client/target \
+    cd examples/rpc-client && cargo build --release && \
+    cp target/release/rpc-client /usr/local/bin/rpc-client
 
 # Copy entrypoint
 COPY scripts/client-entrypoint.sh /usr/local/bin/client-entrypoint.sh

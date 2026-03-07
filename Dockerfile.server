@@ -102,12 +102,14 @@ WORKDIR /workspace
 COPY . .
 
 # Build the tahini sidecar (C, Bazel)
-RUN . $SGX_SDK/environment && bazel build //:sidecar_bin //:enclave_signed
+RUN --mount=type=cache,target=/root/.cache/bazel \
+    . $SGX_SDK/environment && bazel build //:sidecar_bin //:enclave_signed
 
 # Build fizz-sidecar (C++, Bazel) for delegated credential generation
 # rules_python refuses to run as root, so we use a non-root user for this step.
 # fizz.crt/fizz.key are runtime artifacts but listed as BUILD data deps; create placeholders.
-RUN useradd -m builder && \
+RUN --mount=type=cache,target=/home/builder/.cache/bazel,uid=1000,gid=1000 \
+    useradd -u 1000 -m builder && \
     touch third_party/fizz-rs/demo/fizz-sidecar/fizz.crt \
           third_party/fizz-rs/demo/fizz-sidecar/fizz.key && \
     chown -R builder:builder third_party/fizz-rs/demo/fizz-sidecar && \
@@ -115,7 +117,10 @@ RUN useradd -m builder && \
     HOME=/home/builder runuser -u builder -- bazel build :sidecar
 
 # Build RPC server (Rust, cargo)
-RUN cd examples/rpc-server && cargo build --release
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/examples/rpc-server/target \
+    cd examples/rpc-server && cargo build --release && \
+    cp target/release/rpc-server /usr/local/bin/rpc-server
 
 # Copy entrypoint
 COPY scripts/server-entrypoint.sh /usr/local/bin/server-entrypoint.sh
