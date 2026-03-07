@@ -1,0 +1,23 @@
+#cloud-config
+
+package_update: true
+
+packages:
+  - docker.io
+  - docker-compose-plugin
+  - wget
+  - rsync
+  - git
+
+runcmd:
+  - systemctl enable --now docker
+  - usermod -aG docker azureuser
+  # Install Bazelisk as /usr/local/bin/bazel
+  - wget -qO /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+  - chmod +x /usr/local/bin/bazel
+  # Install Intel SGX DCAP driver + libraries (for DC-series VMs)
+  - echo 'deb [arch=amd64] https://download.01.org/intel-sgx/sgx_repo/ubuntu jammy main' > /etc/apt/sources.list.d/intel-sgx.list
+  - wget -qO - https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key | apt-key add -
+  - apt-get update
+  - apt-get install -y libsgx-epid libsgx-quote-ex libsgx-dcap-ql libsgx-dcap-default-qpl sgx-aesm-service
+  - systemctl enable --now aesmd

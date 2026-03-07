@@ -14,6 +14,13 @@ Enclave_t.h
 Enclave_u.c
 Enclave_u.h
 
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/.terraform.lock.hcl
+infra/terraform/*.tfvars
+
 # IDE
 .vscode/
 .idea/

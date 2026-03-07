@@ -116,7 +116,7 @@ This installs `az-dcap-client` which routes collateral requests to Azure THIM in
 
 ## End to End Demonstration with Delegated TLS and fizz-rs
 
-This required a Microsoft Azure confidential VM. Set up a confidential Intel SGX VM using this [guide](https://learn.microsoft.com/en-us/azure/confidential-computing/quick-create-portal) from Microsoft Azure. Clone this repository in the VM.
+This requires a Microsoft Azure confidential VM. You can provision one with Terraform (see above) or set it up manually using this [guide](https://learn.microsoft.com/en-us/azure/confidential-computing/quick-create-portal) from Microsoft Azure. Clone this repository in the VM.
 
 The sidecar can launch an RPC server that uses [delegated credentials](https://datatracker.ietf.org/doc/rfc9345/) (RFC 9345) for TLS, providing two trust layers. The first layer is the SGX attestation, which proves to the RPC client that the right code / binary is running for the RPC server. The second layer, Delegated TLS, proves that the communication channel can be trusted, i.e., it is encrypted with a short-lived credential signed by a trusted certificate authority (CA). This second part uses [fizz-rs](https://github.com/BUSPACELab/fizz-rs) which is included as a submodule at `third_party/fizz-rs`.
 
@@ -154,3 +154,34 @@ The sidecar accepts optional flags for delegated credential integration:
 - `--tahini-dc`: path to the server delegated credential JSON (forwarded to the service binary)
 - `--tahini-dc-cert`: path to the parent TLS certificate (forwarded to the service binary)
 - `--tahini-dc-sig`: path to client verification info JSON (printed to stderr for clients)
+
+
+## Provisioning an Azure SGX VM with Terraform
+
+Instead of manually creating a VM, you can also use the provided Terraform configuration:
+
+```bash
+cd infra/terraform
+terraform init
+terraform apply
+```
+
+This provisions a `Standard_DC1s_v3` (SGX-capable) VM with Ubuntu 22.04, Docker, Bazelisk, and the Intel SGX DCAP libraries pre-installed via cloud-init.
+
+After `terraform apply`, use the printed outputs to connect and sync:
+
+```bash
+ssh -i ~/.ssh/tahini-sidecar_key.pem azureuser@$(terraform output -raw public_ip)
+```
+
+Or sync the repo from your local machine
+
+```bash
+bazel run //:sync -- $(terraform output -raw public_ip)
+```
+
+To tear everything down:
+
+```bash
+terraform destroy
+```
