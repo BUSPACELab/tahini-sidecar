@@ -41,8 +41,9 @@ static void* e_malloc_cpy(const void* src, size_t size) {
     return dest;
 }
 
-// ecall_hash_binary hashes the binary and streams it into a memfd; returns that fd.
-// We exec the memfd so we run exactly the bytes we hashed (no replacement, no in-place modification).
+// ecall_hash_binary reads the binary through untrusted memory, snapshots each chunk into
+// the enclave for hashing, then writes the enclave copy to a memfd. The caller execs that
+// memfd, so the executed bytes are exactly the bytes the enclave hashed. This prevents TOCTOU attacks.
 sgx_status_t ecall_hash_binary(const char* binary_path, int* binary_fd) {
     if (!binary_path || !binary_fd) {
         return SGX_ERROR_INVALID_PARAMETER;
@@ -55,8 +56,21 @@ sgx_status_t ecall_hash_binary(const char* binary_path, int* binary_fd) {
         return ret;
     }
 
+    // The `binary_path` as received from the caller is in enclave memory (EDL [in] copy). 
+    // Since the Linux kernel can't read EPC, we copy it to untrusted memory so the open() syscall can read it.
+    // However, the *path* to the binary was never a sensitive value, it was the binary itself that was sensitive.
+    // Therefore, this is not a concern in terms of our trust model. We trust the caller to give us the correct path.
+    size_t path_len = 0;
+    while (binary_path[path_len] != '\0') path_len++;
+    path_len++;
+    void* upath = e_malloc_cpy(binary_path, path_len);
+    if (!upath) {
+        sgx_sha256_close(sha_handle);
+        return SGX_ERROR_OUT_OF_MEMORY;
+    }
+
     long fd_long;
-    sgx_status_t ocall_ret = ocall_syscall(&fd_long, TAHINI_SYSCALL_OPEN, (long)binary_path, TAHINI_FILE_OPEN_FLAG_RDONLY, 0, 0, 0, 0);
+    sgx_status_t ocall_ret = ocall_syscall(&fd_long, TAHINI_SYSCALL_OPEN, (long)upath, TAHINI_FILE_OPEN_FLAG_RDONLY, 0, 0, 0, 0);
     if (ocall_ret != SGX_SUCCESS) {
         sgx_sha256_close(sha_handle);
         return ocall_ret;
@@ -93,6 +107,12 @@ sgx_status_t ecall_hash_binary(const char* binary_path, int* binary_fd) {
     size_t file_offset = 0;
     size_t bytes_read = 0;
 
+    // In this loop, each byte of the binary goes through the following steps:
+    // 1. The byte is read from the file on disk into the sidecar's memory.
+    // 2. The byte is copied from the sidecar's memory into the enclave's memory. This is where the hash is computed.
+    // 3. The byte is copied back from the enclave's memory into the sidecar's memory.
+    // 4. The byte is written from the sidecar's memory to the memfd. This is where the binary is stored. This 
+    //    prevents TOCTOU attacks by ensuring the binary that was executed is the same binary that was hashed.
     do {
         bytes_read = 0;
         long lseek_result;
@@ -105,7 +125,7 @@ sgx_status_t ecall_hash_binary(const char* binary_path, int* binary_fd) {
         }
 
         long read_result;
-        ocall_ret = ocall_syscall(&read_result, TAHINI_SYSCALL_READ, file_fd, (long)buffer, sizeof(buffer), 0, 0, 0);
+        ocall_ret = ocall_syscall(&read_result, TAHINI_SYSCALL_READ, file_fd, (long)write_buf, TAHINI_CHUNK_SIZE, 0, 0, 0);
         if (ocall_ret != SGX_SUCCESS) {
             ocall_syscall(&fd_long, TAHINI_SYSCALL_CLOSE, memfd_fd, 0, 0, 0, 0, 0);
             ocall_syscall(&fd_long, TAHINI_SYSCALL_CLOSE, file_fd, 0, 0, 0, 0, 0);
@@ -115,6 +135,9 @@ sgx_status_t ecall_hash_binary(const char* binary_path, int* binary_fd) {
 
         if (read_result > 0) {
             bytes_read = (size_t)read_result;
+            // Snapshot into enclave memory: hash and memfd write both use this copy,
+            // so a malicious host can't race between the two.
+            memcpy(buffer, write_buf, bytes_read);
             ret = sgx_sha256_update(buffer, bytes_read, sha_handle);
             if (ret != SGX_SUCCESS) {
                 ocall_syscall(&fd_long, TAHINI_SYSCALL_CLOSE, memfd_fd, 0, 0, 0, 0, 0);
