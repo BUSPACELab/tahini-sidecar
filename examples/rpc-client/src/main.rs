@@ -108,15 +108,23 @@ async fn verify_quote_via_maa(
     let claims: serde_json::Value = serde_json::from_slice(&payload_bytes)
         .map_err(|e| format!("failed to parse JWT claims: {}", e))?;
 
-    let report_data_b64 = claims
+    let report_data_raw = claims
         .get("x-ms-sgx-report-data")
         .and_then(|v| v.as_str())
         .ok_or("JWT missing x-ms-sgx-report-data claim")?;
 
-    let report_data = URL_SAFE_NO_PAD
-        .decode(report_data_b64)
-        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(report_data_b64))
-        .map_err(|e| format!("failed to decode report_data: {}", e))?;
+    // MAA returns report_data as a hex string (128 hex chars = 64 bytes).
+    // Try hex first, then fall back to base64 for forward-compatibility.
+    let report_data = if report_data_raw.len() == 128
+        && report_data_raw.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        decode_hex(report_data_raw)
+    } else {
+        URL_SAFE_NO_PAD
+            .decode(report_data_raw)
+            .or_else(|_| base64::engine::general_purpose::STANDARD.decode(report_data_raw))
+            .map_err(|e| format!("failed to decode report_data: {}", e))?
+    };
 
     if report_data.len() != 64 {
         return Err(format!(
