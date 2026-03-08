@@ -28,6 +28,12 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/tahini-sidecar_key.pub"
 }
 
+variable "ssh_private_key_path" {
+  description = "Path to the SSH private key (used in output commands)"
+  type        = string
+  default     = "~/.ssh/tahini-sidecar_key.pem"
+}
+
 variable "allowed_ssh_cidr" {
   description = "CIDR allowed to SSH into the VM (set to your IP for security)"
   type        = string
@@ -38,6 +44,12 @@ variable "os_disk_size_gb" {
   description = "OS disk size in GB"
   type        = number
   default     = 64
+}
+
+variable "github_repo" {
+  description = "GitHub repository (owner/name) to clone on the VM"
+  type        = string
+  default     = "BUSPACELab/tahini-sidecar"
 }
 
 variable "tags" {

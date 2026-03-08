@@ -5,7 +5,7 @@ output "public_ip" {
 
 output "ssh_command" {
   description = "SSH command to connect to the VM"
-  value       = "ssh -i ${var.ssh_public_key_path} ${var.admin_username}@${azurerm_public_ip.tahini.ip_address}"
+  value       = "ssh -i ${var.ssh_private_key_path} ${var.admin_username}@${azurerm_public_ip.tahini.ip_address}"
 }
 
 output "sync_command" {

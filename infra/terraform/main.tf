@@ -112,7 +112,10 @@ resource "azurerm_linux_virtual_machine" "tahini" {
     version   = "latest"
   }
 
-  custom_data = base64encode(templatefile("${path.module}/cloud-init.yaml", {}))
+  custom_data = base64encode(templatefile("${path.module}/cloud-init.yaml", {
+    admin_username = var.admin_username
+    github_repo    = var.github_repo
+  }))
 
   tags = var.tags
 }
