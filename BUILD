@@ -161,10 +161,21 @@ sh_binary(
     name = "demo",
     srcs = ["scripts/demo.sh"],
     data = [
-        "docker-compose.yml",
-        "docker-compose.sgx.yml",
-        "Dockerfile.server",
         "Dockerfile.client",
+        "Dockerfile.server",
+        "docker-compose.sgx.yml",
+        "docker-compose.yml",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Tear down demo containers + shared volume: bazel run //:demo_down
+sh_binary(
+    name = "demo_down",
+    srcs = ["scripts/demo-down.sh"],
+    data = [
+        "docker-compose.sgx.yml",
+        "docker-compose.yml",
     ],
     visibility = ["//visibility:public"],
 )
