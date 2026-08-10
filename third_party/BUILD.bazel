@@ -67,6 +67,17 @@ cc_library(
         ":glog_compat",
         "@crates//:cxx_cc",
         "@fizz",
+        # cpp_bench.cpp and util.cpp, both new at this fizz-rs pin, reach for
+        # folly pieces that fizz does not re-export. Listed one target per
+        # header rather than a catch-all because folly's Bazel build is
+        # deliberately granular and there is no aggregate target.
+        "@folly//folly:range",
+        "@folly//folly/futures:core",
+        "@folly//folly/io/async:delayed_destruction",
+        "@folly//folly/io/async:event_base_manager",
+        "@folly//folly/io/async:server_socket",
+        "@folly//folly/ssl:openssl_cert_utils",
+        "@folly//folly/synchronization:baton",
     ],
 )
 
