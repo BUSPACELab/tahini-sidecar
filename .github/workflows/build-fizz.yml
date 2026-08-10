@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      # Both forms are needed. `fizz-rs/**` catches edits to files inside a
+      # normal checkout, but fizz-rs is a submodule: bumping it changes the
+      # gitlink *at* `third_party/fizz-rs` with nothing underneath, which
+      # `/**` does not match. Without the bare path, the one change most
+      # likely to break this build is the one that skips CI.
+      - "third_party/fizz-rs"
       - "third_party/fizz-rs/**"
       - "third_party/generated/**"
       - "third_party/compat/**"

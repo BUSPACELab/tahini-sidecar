@@ -47,8 +47,6 @@ template <typename T>
 class impl;
 } // namespace
 
-class Opaque;
-
 template <typename T>
 ::std::size_t size_of();
 template <typename T>
@@ -487,6 +485,162 @@ void Slice<T>::swap(Slice &rhs) noexcept {
 }
 #endif // CXXBRIDGE1_RUST_SLICE
 
+#ifndef CXXBRIDGE1_RUST_BOX
+#define CXXBRIDGE1_RUST_BOX
+template <typename T>
+class Box final {
+public:
+  using element_type = T;
+  using const_pointer =
+      typename std::add_pointer<typename std::add_const<T>::type>::type;
+  using pointer = typename std::add_pointer<T>::type;
+
+  Box() = delete;
+  Box(Box &&) noexcept;
+  ~Box() noexcept;
+
+  explicit Box(const T &);
+  explicit Box(T &&);
+
+  Box &operator=(Box &&) & noexcept;
+
+  const T *operator->() const noexcept;
+  const T &operator*() const noexcept;
+  T *operator->() noexcept;
+  T &operator*() noexcept;
+
+  template <typename... Fields>
+  static Box in_place(Fields &&...);
+
+  void swap(Box &) noexcept;
+
+  static Box from_raw(T *) noexcept;
+
+  T *into_raw() noexcept;
+
+  /* Deprecated */ using value_type = element_type;
+
+private:
+  class uninit;
+  class allocation;
+  Box(uninit) noexcept;
+  void drop() noexcept;
+
+  friend void swap(Box &lhs, Box &rhs) noexcept { lhs.swap(rhs); }
+
+  T *ptr;
+};
+
+template <typename T>
+class Box<T>::uninit {};
+
+template <typename T>
+class Box<T>::allocation {
+  static T *alloc() noexcept;
+  static void dealloc(T *) noexcept;
+
+public:
+  allocation() noexcept : ptr(alloc()) {}
+  ~allocation() noexcept {
+    if (this->ptr) {
+      dealloc(this->ptr);
+    }
+  }
+  T *ptr;
+};
+
+template <typename T>
+Box<T>::Box(Box &&other) noexcept : ptr(other.ptr) {
+  other.ptr = nullptr;
+}
+
+template <typename T>
+Box<T>::Box(const T &val) {
+  allocation alloc;
+  ::new (alloc.ptr) T(val);
+  this->ptr = alloc.ptr;
+  alloc.ptr = nullptr;
+}
+
+template <typename T>
+Box<T>::Box(T &&val) {
+  allocation alloc;
+  ::new (alloc.ptr) T(std::move(val));
+  this->ptr = alloc.ptr;
+  alloc.ptr = nullptr;
+}
+
+template <typename T>
+Box<T>::~Box() noexcept {
+  if (this->ptr) {
+    this->drop();
+  }
+}
+
+template <typename T>
+Box<T> &Box<T>::operator=(Box &&other) & noexcept {
+  if (this->ptr) {
+    this->drop();
+  }
+  this->ptr = other.ptr;
+  other.ptr = nullptr;
+  return *this;
+}
+
+template <typename T>
+const T *Box<T>::operator->() const noexcept {
+  return this->ptr;
+}
+
+template <typename T>
+const T &Box<T>::operator*() const noexcept {
+  return *this->ptr;
+}
+
+template <typename T>
+T *Box<T>::operator->() noexcept {
+  return this->ptr;
+}
+
+template <typename T>
+T &Box<T>::operator*() noexcept {
+  return *this->ptr;
+}
+
+template <typename T>
+template <typename... Fields>
+Box<T> Box<T>::in_place(Fields &&...fields) {
+  allocation alloc;
+  auto ptr = alloc.ptr;
+  ::new (ptr) T{std::forward<Fields>(fields)...};
+  alloc.ptr = nullptr;
+  return from_raw(ptr);
+}
+
+template <typename T>
+void Box<T>::swap(Box &rhs) noexcept {
+  using std::swap;
+  swap(this->ptr, rhs.ptr);
+}
+
+template <typename T>
+Box<T> Box<T>::from_raw(T *raw) noexcept {
+  Box box = uninit{};
+  box.ptr = raw;
+  return box;
+}
+
+template <typename T>
+T *Box<T>::into_raw() noexcept {
+  T *raw = this->ptr;
+  this->ptr = nullptr;
+  return raw;
+}
+
+template <typename T>
+Box<T>::Box(uninit) noexcept {}
+#endif // CXXBRIDGE1_RUST_BOX
+
 #ifndef CXXBRIDGE1_RUST_BITCOPY_T
 #define CXXBRIDGE1_RUST_BITCOPY_T
 struct unsafe_bitcopy_t final {
@@ -737,6 +891,16 @@ template <typename T>
 Vec<T>::Vec(unsafe_bitcopy_t, const Vec &bits) noexcept : repr(bits.repr) {}
 #endif // CXXBRIDGE1_RUST_VEC
 
+#ifndef CXXBRIDGE1_RUST_OPAQUE
+#define CXXBRIDGE1_RUST_OPAQUE
+class Opaque {
+public:
+  Opaque() = delete;
+  Opaque(const Opaque &) = delete;
+  ~Opaque() = delete;
+};
+#endif // CXXBRIDGE1_RUST_OPAQUE
+
 #ifndef CXXBRIDGE1_IS_COMPLETE
 #define CXXBRIDGE1_IS_COMPLETE
 namespace detail {
@@ -859,6 +1023,9 @@ struct ServiceCredential;
 struct VerificationInfo;
 struct CertificateData;
 struct CertificatePublic;
+struct ReadOutcome;
+struct IoContext;
+struct ReadWaker;
 using FizzPrivateKey = ::FizzPrivateKey;
 using FizzCredentialGenerator = ::FizzCredentialGenerator;
 using FizzServerContext = ::FizzServerContext;
@@ -955,7 +1122,60 @@ struct CertificatePublic final {
 };
 #endif // CXXBRIDGE1_STRUCT_CertificatePublic
 
+#ifndef CXXBRIDGE1_STRUCT_ReadOutcome
+#define CXXBRIDGE1_STRUCT_ReadOutcome
+// Outcome of a coalesced poll-read FFI call. Avoids 2-3 cxx round-trips
+// (size_hint + read_eof + read) per `poll_read`.
+struct ReadOutcome final {
+  // Number of bytes actually copied into the caller's buffer.
+  ::std::uint64_t bytes_read CXX_DEFAULT_VALUE(0);
+  // True iff the peer has closed and no more data will arrive.
+  bool eof CXX_DEFAULT_VALUE(false);
+
+  using IsRelocatable = ::std::true_type;
+};
+#endif // CXXBRIDGE1_STRUCT_ReadOutcome
+
+#ifndef CXXBRIDGE1_STRUCT_IoContext
+#define CXXBRIDGE1_STRUCT_IoContext
+struct IoContext final : public ::rust::Opaque {
+  ~IoContext() = delete;
+
+private:
+  friend ::rust::layout;
+  struct layout {
+    static ::std::size_t size() noexcept;
+    static ::std::size_t align() noexcept;
+  };
+};
+#endif // CXXBRIDGE1_STRUCT_IoContext
+
+#ifndef CXXBRIDGE1_STRUCT_ReadWaker
+#define CXXBRIDGE1_STRUCT_ReadWaker
+// Opaque Rust `Waker` slot. `poll_read` registers a `Waker` into it;
+// C++ read callbacks call `wake_read_waker` to fire it.
+struct ReadWaker final : public ::rust::Opaque {
+  ~ReadWaker() = delete;
+
+private:
+  friend ::rust::layout;
+  struct layout {
+    static ::std::size_t size() noexcept;
+    static ::std::size_t align() noexcept;
+  };
+};
+#endif // CXXBRIDGE1_STRUCT_ReadWaker
+
 extern "C" {
+::std::size_t cxxbridge1$IoContext$operator$sizeof() noexcept;
+::std::size_t cxxbridge1$IoContext$operator$alignof() noexcept;
+
+void cxxbridge1$handle_io_result(::IoContext *context, ::std::size_t bytes, ::rust::String *error) noexcept;
+::std::size_t cxxbridge1$ReadWaker$operator$sizeof() noexcept;
+::std::size_t cxxbridge1$ReadWaker$operator$alignof() noexcept;
+
+void cxxbridge1$wake_read_waker(::ReadWaker const &waker) noexcept;
+
 ::rust::repr::PtrLen cxxbridge1$load_certificate_from_pem(::rust::Str cert_pem, ::rust::Str key_pem, ::CertificateData *return$) noexcept {
   ::CertificateData (*load_certificate_from_pem$)(::rust::Str, ::rust::Str) = ::load_certificate_from_pem;
   ::rust::repr::PtrLen throw$;
@@ -1135,6 +1355,18 @@ void cxxbridge1$verification_info_to_json(::VerificationInfo const &info, ::rust
   return throw$;
 }
 
+::rust::repr::PtrLen cxxbridge1$new_server_tls_context_no_dc(::CertificateData const &parent_cert, ::FizzServerContext **return$) noexcept {
+  ::std::unique_ptr<::FizzServerContext> (*new_server_tls_context_no_dc$)(::CertificateData const &) = ::new_server_tls_context_no_dc;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        new (return$) ::FizzServerContext *(new_server_tls_context_no_dc$(parent_cert).release());
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+
 void cxxbridge1$server_context_set_alpn_protocols(::FizzServerContext &ctx, ::rust::Vec<::rust::String> const *protocols) noexcept {
   void (*server_context_set_alpn_protocols$)(::FizzServerContext &, ::rust::Vec<::rust::String>) = ::server_context_set_alpn_protocols;
   server_context_set_alpn_protocols$(ctx, ::rust::Vec<::rust::String>(::rust::unsafe_bitcopy, *protocols));
@@ -1198,6 +1430,23 @@ void cxxbridge1$server_connection_close(::FizzServerConnection &conn) noexcept {
   return throw$;
 }
 
+bool cxxbridge1$server_connection_read_eof(::FizzServerConnection const &conn) noexcept {
+  bool (*server_connection_read_eof$)(::FizzServerConnection const &) = ::server_connection_read_eof;
+  return server_connection_read_eof$(conn);
+}
+
+::rust::repr::PtrLen cxxbridge1$server_connection_read_or_status(::FizzServerConnection &conn, ::rust::Slice<::std::uint8_t > buf, ::ReadOutcome *return$) noexcept {
+  ::ReadOutcome (*server_connection_read_or_status$)(::FizzServerConnection &, ::rust::Slice<::std::uint8_t >) = ::server_connection_read_or_status;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        new (return$) ::ReadOutcome(server_connection_read_or_status$(conn, buf));
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+
 ::rust::repr::PtrLen cxxbridge1$server_connection_write(::FizzServerConnection &conn, ::rust::Slice<::std::uint8_t const> buf, ::std::size_t *return$) noexcept {
   ::std::size_t (*server_connection_write$)(::FizzServerConnection &, ::rust::Slice<::std::uint8_t const>) = ::server_connection_write;
   ::rust::repr::PtrLen throw$;
@@ -1216,6 +1465,18 @@ void cxxbridge1$server_connection_close(::FizzServerConnection &conn) noexcept {
   ::rust::behavior::trycatch(
       [&] {
         new (return$) ::FizzClientContext *(new_client_tls_context$(verification_info, ca_cert_path).release());
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+
+::rust::repr::PtrLen cxxbridge1$new_client_tls_context_no_dc(::rust::Str ca_cert_path, ::FizzClientContext **return$) noexcept {
+  ::std::unique_ptr<::FizzClientContext> (*new_client_tls_context_no_dc$)(::rust::Str) = ::new_client_tls_context_no_dc;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        new (return$) ::FizzClientContext *(new_client_tls_context_no_dc$(ca_cert_path).release());
         throw$.ptr = nullptr;
       },
       ::rust::detail::Fail(throw$));
@@ -1290,6 +1551,23 @@ void cxxbridge1$client_connection_close(::FizzClientConnection &conn) noexcept {
   return throw$;
 }
 
+bool cxxbridge1$client_connection_read_eof(::FizzClientConnection const &conn) noexcept {
+  bool (*client_connection_read_eof$)(::FizzClientConnection const &) = ::client_connection_read_eof;
+  return client_connection_read_eof$(conn);
+}
+
+::rust::repr::PtrLen cxxbridge1$client_connection_read_or_status(::FizzClientConnection &conn, ::rust::Slice<::std::uint8_t > buf, ::ReadOutcome *return$) noexcept {
+  ::ReadOutcome (*client_connection_read_or_status$)(::FizzClientConnection &, ::rust::Slice<::std::uint8_t >) = ::client_connection_read_or_status;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        new (return$) ::ReadOutcome(client_connection_read_or_status$(conn, buf));
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+
 ::rust::repr::PtrLen cxxbridge1$client_connection_write(::FizzClientConnection &conn, ::rust::Slice<::std::uint8_t const> buf, ::std::size_t *return$) noexcept {
   ::std::size_t (*client_connection_write$)(::FizzClientConnection &, ::rust::Slice<::std::uint8_t const>) = ::client_connection_write;
   ::rust::repr::PtrLen throw$;
@@ -1313,6 +1591,82 @@ void cxxbridge1$client_connection_close(::FizzClientConnection &conn) noexcept {
       ::rust::detail::Fail(throw$));
   return throw$;
 }
+
+::rust::repr::PtrLen cxxbridge1$server_connection_handshake_async(::FizzServerConnection &conn, ::IoContext *context) noexcept {
+  void (*server_connection_handshake_async$)(::FizzServerConnection &, ::rust::Box<::IoContext>) = ::server_connection_handshake_async;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        server_connection_handshake_async$(conn, ::rust::Box<::IoContext>::from_raw(context));
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+
+::rust::repr::PtrLen cxxbridge1$client_connection_handshake_async(::FizzClientConnection &conn, ::IoContext *context) noexcept {
+  void (*client_connection_handshake_async$)(::FizzClientConnection &, ::rust::Box<::IoContext>) = ::client_connection_handshake_async;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        client_connection_handshake_async$(conn, ::rust::Box<::IoContext>::from_raw(context));
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+
+void cxxbridge1$set_server_read_waker(::FizzServerConnection &conn, ::ReadWaker *waker) noexcept {
+  void (*set_server_read_waker$)(::FizzServerConnection &, ::rust::Box<::ReadWaker>) = ::set_server_read_waker;
+  set_server_read_waker$(conn, ::rust::Box<::ReadWaker>::from_raw(waker));
+}
+
+void cxxbridge1$set_client_read_waker(::FizzClientConnection &conn, ::ReadWaker *waker) noexcept {
+  void (*set_client_read_waker$)(::FizzClientConnection &, ::rust::Box<::ReadWaker>) = ::set_client_read_waker;
+  set_client_read_waker$(conn, ::rust::Box<::ReadWaker>::from_raw(waker));
+}
+
+::rust::repr::PtrLen cxxbridge1$run_fizz_cpp_bench(::FizzServerContext const &server_ctx, ::FizzClientContext const &client_ctx, ::std::uint64_t pairs, ::std::uint64_t batch_size, ::std::uint64_t rounds, ::std::uint64_t *return$) noexcept {
+  ::std::uint64_t (*run_fizz_cpp_bench$)(::FizzServerContext const &, ::FizzClientContext const &, ::std::uint64_t, ::std::uint64_t, ::std::uint64_t) = ::run_fizz_cpp_bench;
+  ::rust::repr::PtrLen throw$;
+  ::rust::behavior::trycatch(
+      [&] {
+        new (return$) ::std::uint64_t(run_fizz_cpp_bench$(server_ctx, client_ctx, pairs, batch_size, rounds));
+        throw$.ptr = nullptr;
+      },
+      ::rust::detail::Fail(throw$));
+  return throw$;
+}
+} // extern "C"
+
+::std::size_t IoContext::layout::size() noexcept {
+  return cxxbridge1$IoContext$operator$sizeof();
+}
+
+::std::size_t IoContext::layout::align() noexcept {
+  return cxxbridge1$IoContext$operator$alignof();
+}
+
+void handle_io_result(::rust::Box<::IoContext> context, ::std::size_t bytes, ::rust::String error) noexcept {
+  cxxbridge1$handle_io_result(context.into_raw(), bytes, &error);
+}
+
+::std::size_t ReadWaker::layout::size() noexcept {
+  return cxxbridge1$ReadWaker$operator$sizeof();
+}
+
+::std::size_t ReadWaker::layout::align() noexcept {
+  return cxxbridge1$ReadWaker$operator$alignof();
+}
+
+void wake_read_waker(::ReadWaker const &waker) noexcept {
+  cxxbridge1$wake_read_waker(waker);
+}
+
+extern "C" {
+::IoContext *cxxbridge1$box$IoContext$alloc() noexcept;
+void cxxbridge1$box$IoContext$dealloc(::IoContext *) noexcept;
+void cxxbridge1$box$IoContext$drop(::rust::Box<::IoContext> *ptr) noexcept;
 
 static_assert(::rust::detail::is_complete<::std::remove_extent<::FizzPrivateKey>::type>::value, "definition of `::FizzPrivateKey` is required");
 static_assert(sizeof(::std::unique_ptr<::FizzPrivateKey>) == sizeof(void *), "");
@@ -1427,4 +1781,37 @@ void cxxbridge1$unique_ptr$FizzClientConnection$raw(::std::unique_ptr<::FizzClie
 void cxxbridge1$unique_ptr$FizzClientConnection$drop(::std::unique_ptr<::FizzClientConnection> *ptr) noexcept {
   ::rust::deleter_if<::rust::detail::is_complete<::FizzClientConnection>::value>{}(ptr);
 }
+
+::ReadWaker *cxxbridge1$box$ReadWaker$alloc() noexcept;
+void cxxbridge1$box$ReadWaker$dealloc(::ReadWaker *) noexcept;
+void cxxbridge1$box$ReadWaker$drop(::rust::Box<::ReadWaker> *ptr) noexcept;
 } // extern "C"
+
+namespace rust {
+inline namespace cxxbridge1 {
+template <>
+::IoContext *Box<::IoContext>::allocation::alloc() noexcept {
+  return cxxbridge1$box$IoContext$alloc();
+}
+template <>
+void Box<::IoContext>::allocation::dealloc(::IoContext *ptr) noexcept {
+  cxxbridge1$box$IoContext$dealloc(ptr);
+}
+template <>
+void Box<::IoContext>::drop() noexcept {
+  cxxbridge1$box$IoContext$drop(this);
+}
+template <>
+::ReadWaker *Box<::ReadWaker>::allocation::alloc() noexcept {
+  return cxxbridge1$box$ReadWaker$alloc();
+}
+template <>
+void Box<::ReadWaker>::allocation::dealloc(::ReadWaker *ptr) noexcept {
+  cxxbridge1$box$ReadWaker$dealloc(ptr);
+}
+template <>
+void Box<::ReadWaker>::drop() noexcept {
+  cxxbridge1$box$ReadWaker$drop(this);
+}
+} // namespace cxxbridge1
+} // namespace rust

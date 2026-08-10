@@ -12,11 +12,30 @@ cc_library(
 
 # Pre-generated CXX bridge header (accessible as fizz_rs/src/bridge.rs.h).
 # Generated with: cxxbridge third_party/fizz-rs/src/bridge.rs --header
+#
+# Regenerate whenever the fizz-rs submodule moves and src/bridge.rs changed
+# with it, along with generated/bridge.rs.cc. A stale pair fails at link time
+# with missing cxxbridge1$ symbols rather than at compile time, so it is worth
+# checking deliberately: `git diff <old>..<new> -- src/bridge.rs` in fizz-rs.
 cc_library(
     name = "fizz_rs_bridge_include",
     hdrs = ["generated/bridge.rs.h"],
     strip_include_prefix = "generated",
     include_prefix = "fizz_rs/src",
+)
+
+# The cxx runtime header, vendored from cxx 1.0.176 — the version fizz-rs
+# pins exactly (`cxx = { version = "=1.0.176" }`), so this copy must be
+# updated in lockstep with that pin.
+#
+# Needed because fizz-rs's client_tls_ffi.h and server_tls_ffi.h include it as
+# <rust/cxx.h>. `@crates//:cxx_cc` builds the cxx runtime but does not export
+# the header under that path, so without this the FFI sources fail to compile.
+cc_library(
+    name = "cxx_runtime_include",
+    hdrs = ["generated/cxx.h"],
+    strip_include_prefix = "generated",
+    include_prefix = "rust",
 )
 
 # FFI header files (exposed as ffi/*.h).
@@ -26,6 +45,7 @@ cc_library(
     strip_include_prefix = "fizz-rs/src",
     copts = ["-std=c++17"],
     deps = [
+        ":cxx_runtime_include",
         ":glog_compat",
         "@crates//:cxx_cc",
         "@fizz",
@@ -41,6 +61,7 @@ cc_library(
     copts = ["-std=c++17"],
     linkstatic = True,
     deps = [
+        ":cxx_runtime_include",
         ":fizz_rs_bridge_include",
         ":fizz_rs_ffi_hdrs",
         ":glog_compat",
