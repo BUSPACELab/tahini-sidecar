@@ -8,6 +8,10 @@ bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "rules_rust", version = "0.68.1")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "fizz", version = "2025.02.10.00.bcr.2")
+# Declared explicitly, at the version fizz already pulls in transitively, so
+# that specific folly targets can be named in deps. fizz re-exports only the
+# folly pieces it uses itself, and fizz-rs's FFI needs a few more.
+bazel_dep(name = "folly", version = "2025.01.13.00.bcr.5")
 
 # Rust toolchain
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
