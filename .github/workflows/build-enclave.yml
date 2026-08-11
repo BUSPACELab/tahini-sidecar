@@ -82,7 +82,9 @@ jobs:
           set -euo pipefail
           wget -q https://download.01.org/intel-sgx/sgx-linux/2.27/distro/ubuntu22.04-server/sgx_linux_x64_sdk_2.27.100.1.bin
           chmod +x sgx_linux_x64_sdk_2.27.100.1.bin
-          ./sgx_linux_x64_sdk_2.27.100.1.bin --prefix /opt/intel
+          # sudo because /opt is root-owned on a runner; the Dockerfile gets away
+          # without it by running as root.
+          sudo ./sgx_linux_x64_sdk_2.27.100.1.bin --prefix /opt/intel
           rm -f sgx_linux_x64_sdk_2.27.100.1.bin
 
       - name: Build the untrusted launcher and the signed enclave
