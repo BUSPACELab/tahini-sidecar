@@ -1,0 +1,116 @@
+name: Build Enclave
+
+# Compiles the SGX halves of the sidecar: the untrusted launcher, the generated
+# EDL bridge, and the signed enclave.
+#
+# This code had no CI at all. e_sidecar.c, u_main.c and sidecar.edl were built
+# only when someone ran Bazel on a machine with the SGX SDK, which meant a typo
+# in the enclave surfaced on a provisioned confidential VM rather than on a pull
+# request. Compiling is cheap; finding out later is not.
+#
+# SGX_MODE=SIM because a GitHub runner has no SGX hardware. Simulation cannot
+# generate a DCAP quote — the sidecar exits at that step without real SGX — so
+# this job proves the code compiles and the enclave signs, not that attestation
+# works. That part can only be tested on hardware.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "e_sidecar.c"
+      - "u_main.c"
+      - "u_util.c"
+      - "u_util.h"
+      - "sidecar.h"
+      - "sidecar.edl"
+      - "sidecar.lds"
+      - "sidecar.config.xml"
+      - "BUILD"
+      - "MODULE.bazel"
+      - ".github/workflows/build-enclave.yml"
+  pull_request:
+    paths:
+      - "e_sidecar.c"
+      - "u_main.c"
+      - "u_util.c"
+      - "u_util.h"
+      - "sidecar.h"
+      - "sidecar.edl"
+      - "sidecar.lds"
+      - "sidecar.config.xml"
+      - "BUILD"
+      - "MODULE.bazel"
+      - ".github/workflows/build-enclave.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build sidecar + enclave (SGX_MODE=SIM)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The nested fizz-rs submodule is not needed: neither sidecar_bin nor
+          # enclave_signed depends on it, and skipping it avoids a large clone.
+          submodules: false
+
+      - name: Install Bazelisk
+        run: |
+          sudo wget -qO /usr/local/bin/bazel \
+            https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+          sudo chmod +x /usr/local/bin/bazel
+
+      # The DCAP headers and libraries are needed even in SIM, because
+      # sidecar_bin links libsgx_dcap_ql for quote generation regardless of mode.
+      - name: Install SGX runtime and DCAP
+        run: |
+          set -euo pipefail
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key \
+            | sudo tee /etc/apt/keyrings/intel-sgx.asc >/dev/null
+          echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/intel-sgx.asc] https://download.01.org/intel-sgx/sgx_repo/ubuntu jammy main' \
+            | sudo tee /etc/apt/sources.list.d/intel-sgx.list
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsgx-enclave-common libsgx-urts libsgx-quote-ex \
+            libsgx-dcap-ql libsgx-dcap-ql-dev libsgx-enclave-common-dev
+
+      # Version pinned to match the Dockerfile so CI and the image compile
+      # against the same SDK.
+      - name: Install SGX SDK 2.27
+        run: |
+          set -euo pipefail
+          wget -q https://download.01.org/intel-sgx/sgx-linux/2.27/distro/ubuntu22.04-server/sgx_linux_x64_sdk_2.27.100.1.bin
+          chmod +x sgx_linux_x64_sdk_2.27.100.1.bin
+          ./sgx_linux_x64_sdk_2.27.100.1.bin --prefix /opt/intel
+          rm -f sgx_linux_x64_sdk_2.27.100.1.bin
+
+      - name: Build the untrusted launcher and the signed enclave
+        run: |
+          set -euo pipefail
+          source /opt/intel/sgxsdk/environment
+          SGX_MODE=SIM bazel build //:sidecar_bin //:enclave_signed //examples:hello
+
+      - name: Show what was produced
+        run: |
+          set -euo pipefail
+          ls -lh bazel-bin/sidecar bazel-bin/enclave.signed.so
+          file bazel-bin/sidecar bazel-bin/enclave.signed.so
+
+      # The launcher refuses to run unless the caller is in sidecar-owners, and
+      # checks that before touching the enclave. Exercising that path proves the
+      # binary links and starts, which is as far as SIM can go.
+      - name: Check the launcher runs far enough to enforce its group check
+        run: |
+          set -euo pipefail
+          source /opt/intel/sgxsdk/environment
+          out="$(./bazel-bin/sidecar /bin/true 2>&1 || true)"
+          echo "$out"
+          if grep -qiE "permission denied|group sidecar-owners" <<<"$out"; then
+            echo "launcher started and enforced its group check, as expected"
+          elif grep -qiE "failed to create enclave|sgx_qe_get_target_info|get_enclave_quote" <<<"$out"; then
+            echo "launcher started and reached the SGX path; SIM cannot go further"
+          else
+            echo "unexpected output from the launcher" >&2
+            exit 1
+          fi
