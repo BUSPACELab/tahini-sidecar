@@ -44,7 +44,6 @@ struct Args {
 struct AttestationJson {
     quote: String,
     binary_hash: String,
-    public_key: String,
 }
 
 #[derive(Serialize)]
@@ -57,10 +56,16 @@ struct MaaResponse {
     token: String,
 }
 
-fn decode_hex(hex: &str) -> Vec<u8> {
+fn decode_hex(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err(format!("hex string has odd length {}", hex.len()));
+    }
     (0..hex.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16)
+                .map_err(|e| format!("invalid hex at byte {}: {}", i / 2, e))
+        })
         .collect()
 }
 
@@ -145,18 +150,24 @@ async fn verify_quote_via_maa(
     Ok(report_data)
 }
 
-/// Check that report_data = binary_hash (32B) || H(public_key) (32B)
+/// Check that report_data = binary_hash (32B) || H(channel public key) (32B).
+///
+/// The channel key must come from the verification info driving this handshake,
+/// not from the attestation JSON. Hashing a key that ships alongside the quote
+/// would only prove the sidecar is self-consistent; hashing the credential we
+/// are about to require the peer to prove possession of is what ties the quote
+/// to this connection.
 fn verify_report_data(
     report_data: &[u8],
     expected_binary_hash: &[u8],
-    expected_public_key: &[u8],
+    channel_public_key: &[u8],
 ) -> Result<(), String> {
     if report_data.len() != 64 {
         return Err(format!("report_data length {} != 64", report_data.len()));
     }
 
     let rd_hash = &report_data[..32];
-    let rd_pubkey_commitment = &report_data[32..64];
+    let rd_key_commitment = &report_data[32..64];
 
     if rd_hash != expected_binary_hash {
         return Err(format!(
@@ -167,14 +178,16 @@ fn verify_report_data(
     }
 
     let mut hasher = Sha256::new();
-    hasher.update(expected_public_key);
-    let pubkey_hash = hasher.finalize();
+    hasher.update(channel_public_key);
+    let key_hash = hasher.finalize();
 
-    if rd_pubkey_commitment != pubkey_hash.as_slice() {
+    if rd_key_commitment != key_hash.as_slice() {
         return Err(format!(
-            "public key commitment mismatch: report_data has {}, expected H(pubkey)={}",
-            hex::encode(rd_pubkey_commitment),
-            hex::encode(&pubkey_hash)
+            "channel key commitment mismatch: report_data has {}, expected H(dc pubkey)={}. \
+             The quote does not cover the credential this connection uses, so it says nothing \
+             about the peer. Was the sidecar launched without --tahini-dc-pubkey?",
+            hex::encode(rd_key_commitment),
+            hex::encode(&key_hash)
         ));
     }
 
@@ -198,6 +211,15 @@ async fn main() {
     let attest: AttestationJson =
         serde_json::from_reader(attest_file).expect("failed to parse attestation JSON");
 
+    // Loaded before the quote check because the commitment is verified against
+    // this credential; the same info then drives the handshake below.
+    eprintln!("[rpc-client] loading verification info from {}", args.dc_sig);
+    let file = File::open(&args.dc_sig).expect("failed to open verification info JSON");
+    let info: VerificationInfo =
+        serde_json::from_reader(file).expect("failed to parse verification info JSON");
+    let channel_pubkey =
+        decode_hex(&info.public_key_der).expect("verification info public_key_der is not hex");
+
     eprintln!(
         "[rpc-client] verifying DCAP quote via {}...",
         args.maa_endpoint
@@ -208,14 +230,14 @@ async fn main() {
 
     eprintln!("[rpc-client] SGX quote verified by Azure Attestation");
 
-    let binary_hash_bytes = decode_hex(&attest.binary_hash);
-    let public_key_bytes = decode_hex(&attest.public_key);
+    let binary_hash_bytes =
+        decode_hex(&attest.binary_hash).expect("attestation binary_hash is not hex");
 
-    verify_report_data(&report_data, &binary_hash_bytes, &public_key_bytes)
+    verify_report_data(&report_data, &binary_hash_bytes, &channel_pubkey)
         .expect("report_data verification failed");
 
     eprintln!(
-        "[rpc-client] report_data verified: binary_hash={}, pubkey_commitment OK",
+        "[rpc-client] report_data verified: binary_hash={}, quote is bound to this channel's credential",
         attest.binary_hash
     );
 
@@ -229,14 +251,10 @@ async fn main() {
         eprintln!("[rpc-client] binary hash matches expected value");
     }
 
-    // Step 2: establish delegated TLS connection
-    eprintln!("[rpc-client] loading verification info from {}", args.dc_sig);
+    // Step 2: establish delegated TLS connection. The handshake proves the peer
+    // holds the private key for the credential the quote just committed to.
     eprintln!("[rpc-client] loading parent cert from {}", args.dc_cert);
     eprintln!("[rpc-client] connecting to {}", args.server);
-
-    let file = File::open(&args.dc_sig).expect("failed to open verification info JSON");
-    let info: VerificationInfo =
-        serde_json::from_reader(file).expect("failed to parse verification info JSON");
 
     let tls = ClientTlsContext::new(info, &args.dc_cert)
         .expect("failed to create client TLS context");

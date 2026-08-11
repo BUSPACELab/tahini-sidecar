@@ -209,11 +209,15 @@ int write_attestation_json(const char* path,
     char pubkey_hex[pubkey_size * 2 + 1];
     bin_to_hex(public_key, pubkey_size, pubkey_hex);
 
+    // enclave_public_key is the enclave's own ECDH key, recorded for reference.
+    // It is deliberately not named public_key: a verifier must check the report's
+    // key commitment against the delegated credential from its own handshake, not
+    // against a key shipped in this file, which would only prove self-consistency.
     fprintf(f,
         "{\n"
         "  \"quote\": \"%s\",\n"
         "  \"binary_hash\": \"%s\",\n"
-        "  \"public_key\": \"%s\"\n"
+        "  \"enclave_public_key\": \"%s\"\n"
         "}\n",
         quote_b64, hash_hex, pubkey_hex);
 
