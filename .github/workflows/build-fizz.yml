@@ -3,6 +3,8 @@ name: Build Fizz Binaries
 on:
   push:
     branches: [main]
+    # Keep in sync with the pull_request paths below. Actions does not support
+    # YAML anchors, so the list has to be written twice.
     paths:
       # Both forms are needed. `fizz-rs/**` catches edits to files inside a
       # normal checkout, but fizz-rs is a submodule: bumping it changes the
@@ -19,10 +21,24 @@ on:
       - "MODULE.bazel"
       - "rust_cxx_bridge.bzl"
       - ".github/workflows/build-fizz.yml"
+  # Without this the build cannot gate the code it builds: a change to the
+  # examples compiles for the first time only once it is already on main.
+  pull_request:
+    paths:
+      - "third_party/fizz-rs"
+      - "third_party/fizz-rs/**"
+      - "third_party/generated/**"
+      - "third_party/compat/**"
+      - "third_party/BUILD.bazel"
+      - "examples/rpc-server/**"
+      - "examples/rpc-client/**"
+      - "MODULE.bazel"
+      - "rust_cxx_bridge.bzl"
+      - ".github/workflows/build-fizz.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   RELEASE_TAG: fizz-latest
@@ -96,7 +112,12 @@ jobs:
   release:
     name: Upload to GitHub Release
     needs: [fizz-sidecar, rpc-binaries]
+    # Pull requests build to check the code compiles; only main publishes the
+    # binaries the Docker images pull.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
