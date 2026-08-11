@@ -26,6 +26,29 @@ void bin_to_hex(const uint8_t* bin, size_t len, char* hex) {
     hex[len*2] = '\0';
 }
 
+static int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+size_t hex_to_bin(const char* hex, uint8_t* out, size_t out_cap) {
+    if (hex == NULL || out == NULL) return 0;
+    size_t hex_len = strlen(hex);
+    // Reject rather than truncate: a caller passing a malformed or oversized key
+    // should fail loudly, because the alternative is attesting a commitment to
+    // something other than the key actually in use.
+    if (hex_len == 0 || (hex_len % 2) != 0 || hex_len / 2 > out_cap) return 0;
+    for (size_t i = 0; i < hex_len; i += 2) {
+        int hi = hex_nibble(hex[i]);
+        int lo = hex_nibble(hex[i + 1]);
+        if (hi < 0 || lo < 0) return 0;
+        out[i / 2] = (uint8_t)((hi << 4) | lo);
+    }
+    return hex_len / 2;
+}
+
 
 int validate_user(void) {
     const char* error_prefix = "error in validate_user: ";

@@ -6,7 +6,12 @@
 // TAHINI_KEY_SIZE is the private key size in bytes
 #define TAHINI_KEY_SIZE 32  
 // TAHINI_PUBKEY_SIZE is the full public key size in bytes for NIST P-256 (32 bytes x + 32 bytes y)
-#define TAHINI_PUBKEY_SIZE 64 
+#define TAHINI_PUBKEY_SIZE 64
+// TAHINI_MAX_CHANNEL_PUBKEY caps the delegated credential's public key that gets
+// committed into the attestation report. A DER-encoded P-256 SubjectPublicKeyInfo
+// is 91 bytes; 256 leaves room for other curves without inviting an unbounded
+// copy across the enclave boundary.
+#define TAHINI_MAX_CHANNEL_PUBKEY 256
 // TAHINI_ENCLAVE_FILE is the default path to the enclave file.
 // Override at runtime via the TAHINI_ENCLAVE environment variable.
 #define TAHINI_ENCLAVE_FILE_DEFAULT "bazel-bin/enclave.signed.so"

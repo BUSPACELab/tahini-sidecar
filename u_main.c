@@ -20,7 +20,12 @@ static void usage(const char* prog) {
         "  --tahini-dc <path>       server delegated credential JSON\n"
         "  --tahini-dc-cert <path>  parent TLS certificate (public)\n"
         "  --tahini-dc-sig <path>   client verification info JSON\n"
-        "  --tahini-quote-out <path> write attestation JSON for client verification\n",
+        "  --tahini-quote-out <path> write attestation JSON for client verification\n"
+        "  --tahini-dc-pubkey <hex> DER public key of the delegated credential, bound\n"
+        "                           into the quote so it attests this TLS channel and\n"
+        "                           not merely this binary. Lift it from the client\n"
+        "                           verification info:\n"
+        "                             jq -r .public_key_der fizz_client.json\n",
         prog);
 }
 
@@ -30,11 +35,14 @@ int main(int argc, char* argv[]) {
     const char* dc_sig_path = NULL;
     const char* quote_out_path = NULL;
 
+    const char* dc_pubkey_hex = NULL;
+
     static struct option long_options[] = {
         {"tahini-dc",        required_argument, NULL, 'd'},
         {"tahini-dc-cert",   required_argument, NULL, 'c'},
         {"tahini-dc-sig",    required_argument, NULL, 's'},
         {"tahini-quote-out", required_argument, NULL, 'q'},
+        {"tahini-dc-pubkey", required_argument, NULL, 'k'},
         {NULL, 0, NULL, 0}
     };
 
@@ -46,6 +54,7 @@ int main(int argc, char* argv[]) {
             case 'c': dc_cert_path   = optarg; break;
             case 's': dc_sig_path    = optarg; break;
             case 'q': quote_out_path = optarg; break;
+            case 'k': dc_pubkey_hex  = optarg; break;
             default:
                 usage(argv[0]);
                 return EXIT_FAILURE;
@@ -105,13 +114,46 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Step 4: create attestation report targeting QE3, binding binary hash + public key
+    // Step 4: create attestation report targeting QE3, binding the binary hash
+    // and a key commitment.
+    //
+    // With --tahini-dc-pubkey, the commitment covers the delegated credential the
+    // service will serve TLS with, so a verifier can check the quote against the
+    // credential it is actually talking to. Without it the enclave falls back to
+    // its own key, which nothing in the TLS path uses — that leaves a relay free
+    // to present a genuine quote while terminating the connection itself, so the
+    // flag is what makes the attestation say anything about *this* channel.
+    //
+    // Taken as hex on the command line rather than parsed out of the
+    // verification-info JSON, because this is plain C with no JSON parser; the
+    // caller can lift public_key_der out with jq.
+    uint8_t dc_pubkey[TAHINI_MAX_CHANNEL_PUBKEY];
+    size_t dc_pubkey_len = 0;
+    if (dc_pubkey_hex != NULL) {
+        dc_pubkey_len = hex_to_bin(dc_pubkey_hex, dc_pubkey, sizeof(dc_pubkey));
+        if (dc_pubkey_len == 0) {
+            fprintf(stderr,
+                    "--tahini-dc-pubkey is not valid hex, or exceeds %d bytes\n",
+                    TAHINI_MAX_CHANNEL_PUBKEY);
+            sgx_destroy_enclave(eid);
+            return EXIT_FAILURE;
+        }
+        fprintf(stderr, "tahini binding channel key (%zu bytes) into the quote\n",
+                dc_pubkey_len);
+    } else {
+        fprintf(stderr,
+                "tahini warning: no --tahini-dc-pubkey, so the quote commits to the "
+                "enclave's own key and says nothing about this TLS channel\n");
+    }
+
     sgx_report_t report;
     uint8_t binary_hash[TAHINI_HASH_SIZE];
     uint8_t pubkey_out[TAHINI_PUBKEY_SIZE];
     ret = ecall_get_attestation_report(eid, &retval, &qe_target_info, &report,
                                        binary_hash, TAHINI_HASH_SIZE,
-                                       pubkey_out, TAHINI_PUBKEY_SIZE);
+                                       pubkey_out, TAHINI_PUBKEY_SIZE,
+                                       dc_pubkey_len ? dc_pubkey : NULL,
+                                       dc_pubkey_len);
     if (ret != SGX_SUCCESS || retval != SGX_SUCCESS) {
         fprintf(stderr, "ecall_get_attestation_report failed (ret=0x%x retval=0x%x)\n", ret, retval);
         sgx_destroy_enclave(eid);
