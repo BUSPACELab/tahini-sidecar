@@ -25,7 +25,9 @@ enclave {
             [out, size=hash_len] uint8_t* binary_hash,
             size_t hash_len,
             [out, size=pubkey_len] uint8_t* public_key,
-            size_t pubkey_len
+            size_t pubkey_len,
+            [in, size=channel_pubkey_len] const uint8_t* channel_pubkey,
+            size_t channel_pubkey_len
         );
         
         public sgx_status_t ecall_launch_service(

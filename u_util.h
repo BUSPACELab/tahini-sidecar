@@ -47,6 +47,12 @@ void ocall_copy_byte(void* dest, uint8_t byte);
 // bin_to_hex converts len bytes of bin into a null-terminated hex string. hex must be at least len*2+1 bytes.
 void bin_to_hex(const uint8_t* bin, size_t len, char* hex);
 
+// hex_to_bin decodes a hex string into out, returning the number of bytes
+// written, or 0 if the input is empty, odd-length, not hex, or longer than
+// out_cap. It rejects rather than truncates: a partially decoded key would be
+// attested as a commitment to something other than the key in use.
+size_t hex_to_bin(const char* hex, uint8_t* out, size_t out_cap);
+
 // dump_file_to_stream reads a file and writes its contents to the given FILE* stream.
 // Returns 0 on success, -1 on failure.
 int dump_file_to_stream(const char* path, FILE* stream);

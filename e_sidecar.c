@@ -239,33 +239,61 @@ sgx_status_t ecall_generate_credentials(
 // hash_len is the length of the binary hash (32 bytes)
 // public_key_out is the output public key (64 bytes: x + y)
 // pubkey_len is the length of the public key (64 bytes)
+// channel_pubkey is the DER-encoded public key of the delegated credential the
+// service will serve TLS with; channel_pubkey_len is its length, or 0 to bind the
+// enclave's own key instead.
 sgx_status_t ecall_get_attestation_report(
     const sgx_target_info_t* target_info,
     sgx_report_t* report,
     uint8_t* binary_hash_out,
     size_t hash_len,
     uint8_t* public_key_out,
-    size_t pubkey_len
+    size_t pubkey_len,
+    const uint8_t* channel_pubkey,
+    size_t channel_pubkey_len
 ) {
     if (!initialized) {
         return SGX_ERROR_UNEXPECTED;
     }
-    
+
     if (hash_len != TAHINI_HASH_SIZE || pubkey_len != TAHINI_PUBKEY_SIZE) {
         return SGX_ERROR_INVALID_PARAMETER;
     }
-    
-    // Copy hash and public key commitment to report data
-    // sgx_report_data_t is 64 bytes total, structured as:
-    // - report_data.d[0..31]: binary hash (32 bytes)
-    // - report_data.d[32..63]: public key commitment (32 bytes, hash of full 64-byte public key)
-    // We can't fit the full 64-byte public key because we need 32 bytes for the binary hash,
-    // leaving only 32 bytes remaining. Using a hash commitment cryptographically binds the
-    // full public key in the attestation report. The full 64-byte public key is returned separately.
+
+    // sgx_report_data_t is 64 bytes total:
+    // - report_data.d[0..31]:  binary hash
+    // - report_data.d[32..63]: a 32-byte key commitment
+    //
+    // The commitment binds the delegated credential's public key when one is
+    // supplied, which is what lets a verifier conclude something useful: the
+    // quote then says "the binary measuring H serves TLS with credential D", and
+    // the handshake proves the peer holds D's private key. Those two statements
+    // compose into "the peer on this channel is the attested code".
+    //
+    // Binding the enclave's own key instead — which is what this did, and is the
+    // fallback when no credential is passed — does not compose with anything.
+    // Nothing in the TLS path uses that key, so a relay could present a genuine
+    // quote for the real binary while terminating the connection with its own
+    // credential, and a verifier would have no way to tell. The proof would be
+    // that the right code exists somewhere, not that it is on the other end.
+    //
+    // Only 32 bytes are free, so this is a hash rather than the key itself.
+    uint8_t commitment[TAHINI_HASH_SIZE];
+    if (channel_pubkey != NULL && channel_pubkey_len > 0) {
+        sgx_status_t hret = sgx_sha256_msg(channel_pubkey,
+                                          (uint32_t)channel_pubkey_len,
+                                          (sgx_sha256_hash_t*)commitment);
+        if (hret != SGX_SUCCESS) {
+            return hret;
+        }
+    } else {
+        memcpy(commitment, public_key_commitment, TAHINI_HASH_SIZE);
+    }
+
     sgx_report_data_t report_data = {0};
     memcpy(report_data.d, stored_hash, TAHINI_HASH_SIZE);
-    memcpy(report_data.d + TAHINI_HASH_SIZE, public_key_commitment, TAHINI_HASH_SIZE);
-    
+    memcpy(report_data.d + TAHINI_HASH_SIZE, commitment, TAHINI_HASH_SIZE);
+
     // Generate attestation report
     sgx_status_t ret = sgx_create_report(target_info, &report_data, report);
     if (ret != SGX_SUCCESS) {
