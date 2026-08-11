@@ -8,10 +8,15 @@ name: Build Enclave
 # in the enclave surfaced on a provisioned confidential VM rather than on a pull
 # request. Compiling is cheap; finding out later is not.
 #
-# SGX_MODE=SIM because a GitHub runner has no SGX hardware. Simulation cannot
-# generate a DCAP quote — the sidecar exits at that step without real SGX — so
-# this job proves the code compiles and the enclave signs, not that attestation
-# works. That part can only be tested on hardware.
+# Built with SGX_MODE=HW, which is what Azure deploys, so CI checks the same
+# configuration rather than a near neighbour. HW mode also links libsgx_urts from
+# the distribution packages; SIM links libsgx_urts_sim, which in SDK 2.27 carries
+# a dangling reference to libsgx_uae_service_sim and fails to link at all.
+#
+# A runner has no SGX hardware, so this proves the code compiles, links and that
+# the enclave signs. It cannot prove attestation works — enclave creation and
+# quote generation both need real SGX, and that is only testable on a
+# confidential VM.
 
 on:
   push:
@@ -45,7 +50,7 @@ on:
 
 jobs:
   build:
-    name: Build sidecar + enclave (SGX_MODE=SIM)
+    name: Build sidecar + enclave (SGX_MODE=HW)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -94,7 +99,7 @@ jobs:
           # sourcing it under `set -u` aborts with "unbound variable".
           source /opt/intel/sgxsdk/environment
           set -u
-          SGX_MODE=SIM bazel build //:sidecar_bin //:enclave_signed //examples:hello
+          SGX_MODE=HW bazel build //:sidecar_bin //:enclave_signed //examples:hello
 
       - name: Show what was produced
         run: |
@@ -102,10 +107,10 @@ jobs:
           ls -lh bazel-bin/sidecar bazel-bin/enclave.signed.so
           file bazel-bin/sidecar bazel-bin/enclave.signed.so
 
-      # The launcher refuses to run unless the caller is in sidecar-owners, and
-      # checks that before touching the enclave. Exercising that path proves the
-      # binary links and starts, which is as far as SIM can go.
-      - name: Check the launcher runs far enough to enforce its group check
+      # The launcher checks its caller is in sidecar-owners before touching the
+      # enclave, so this reaches either that check or the enclave creation that
+      # needs hardware. Both prove it linked and starts.
+      - name: Check the launcher starts
         run: |
           set -eo pipefail
           source /opt/intel/sgxsdk/environment
