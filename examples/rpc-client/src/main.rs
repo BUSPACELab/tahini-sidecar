@@ -123,7 +123,7 @@ async fn verify_quote_via_maa(
     let report_data = if report_data_raw.len() == 128
         && report_data_raw.chars().all(|c| c.is_ascii_hexdigit())
     {
-        decode_hex(report_data_raw)
+        decode_hex(report_data_raw)?
     } else {
         URL_SAFE_NO_PAD
             .decode(report_data_raw)
