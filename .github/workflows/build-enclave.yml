@@ -89,8 +89,11 @@ jobs:
 
       - name: Build the untrusted launcher and the signed enclave
         run: |
-          set -euo pipefail
+          set -eo pipefail
+          # Intel's environment script reads PKG_CONFIG_PATH without a default, so
+          # sourcing it under `set -u` aborts with "unbound variable".
           source /opt/intel/sgxsdk/environment
+          set -u
           SGX_MODE=SIM bazel build //:sidecar_bin //:enclave_signed //examples:hello
 
       - name: Show what was produced
@@ -104,8 +107,9 @@ jobs:
       # binary links and starts, which is as far as SIM can go.
       - name: Check the launcher runs far enough to enforce its group check
         run: |
-          set -euo pipefail
+          set -eo pipefail
           source /opt/intel/sgxsdk/environment
+          set -u
           out="$(./bazel-bin/sidecar /bin/true 2>&1 || true)"
           echo "$out"
           if grep -qiE "permission denied|group sidecar-owners" <<<"$out"; then
