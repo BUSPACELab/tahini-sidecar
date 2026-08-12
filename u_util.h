@@ -57,6 +57,16 @@ size_t hex_to_bin(const char* hex, uint8_t* out, size_t out_cap);
 // Returns 0 on success, -1 on failure.
 int dump_file_to_stream(const char* path, FILE* stream);
 
+// base64url_encode encodes data as unpadded base64url. Returns a malloc'd
+// null-terminated string the caller frees, or NULL on allocation failure.
+// Shared with the attestation server so the quote is encoded identically whether
+// it is written to a file or served over a socket.
+char* base64url_encode(const uint8_t* data, size_t len, size_t* out_len);
+
+// read_file_string reads a whole file into a malloc'd null-terminated string the
+// caller frees. Returns NULL if the file cannot be read.
+char* read_file_string(const char* path);
+
 // write_attestation_json writes attestation artifacts as JSON to the given path.
 // The JSON contains base64url-encoded quote, hex binary hash, and hex public key.
 // Returns 0 on success, -1 on failure.

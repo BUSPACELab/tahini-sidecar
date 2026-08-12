@@ -10,6 +10,7 @@
 #include <sgx_report.h>
 #include <sgx_dcap_ql_wrapper.h>
 #include "sidecar.h"
+#include "u_attest.h"
 #include "u_util.h"
 
 static void usage(const char* prog) {
@@ -25,7 +26,12 @@ static void usage(const char* prog) {
         "                           into the quote so it attests this TLS channel and\n"
         "                           not merely this binary. Lift it from the client\n"
         "                           verification info:\n"
-        "                             jq -r .public_key_der fizz_client.json\n",
+        "                             jq -r .public_key_der fizz_client.json\n"
+        "  --tahini-attest-listen <ip:port>\n"
+        "                           serve the attestation document (quote, binary hash,\n"
+        "                           delegated credential) to callers on this address, so\n"
+        "                           a caller can attest this service before connecting to\n"
+        "                           it. Requires --tahini-dc-sig for the credential half.\n",
         prog);
 }
 
@@ -36,13 +42,15 @@ int main(int argc, char* argv[]) {
     const char* quote_out_path = NULL;
 
     const char* dc_pubkey_hex = NULL;
+    const char* attest_listen = NULL;
 
     static struct option long_options[] = {
-        {"tahini-dc",        required_argument, NULL, 'd'},
-        {"tahini-dc-cert",   required_argument, NULL, 'c'},
-        {"tahini-dc-sig",    required_argument, NULL, 's'},
-        {"tahini-quote-out", required_argument, NULL, 'q'},
-        {"tahini-dc-pubkey", required_argument, NULL, 'k'},
+        {"tahini-dc",            required_argument, NULL, 'd'},
+        {"tahini-dc-cert",       required_argument, NULL, 'c'},
+        {"tahini-dc-sig",        required_argument, NULL, 's'},
+        {"tahini-quote-out",     required_argument, NULL, 'q'},
+        {"tahini-dc-pubkey",     required_argument, NULL, 'k'},
+        {"tahini-attest-listen", required_argument, NULL, 'a'},
         {NULL, 0, NULL, 0}
     };
 
@@ -55,6 +63,7 @@ int main(int argc, char* argv[]) {
             case 's': dc_sig_path    = optarg; break;
             case 'q': quote_out_path = optarg; break;
             case 'k': dc_pubkey_hex  = optarg; break;
+            case 'a': attest_listen  = optarg; break;
             default:
                 usage(argv[0]);
                 return EXIT_FAILURE;
@@ -187,6 +196,40 @@ int main(int argc, char* argv[]) {
             return EXIT_FAILURE;
         }
         fprintf(stderr, "tahini attestation written to %s\n", quote_out_path);
+    }
+
+    // Step 5b: start the attestation endpoint, if asked for.
+    //
+    // Before the quote is freed, because the child serves it, and before the
+    // execveat below, because that replaces this process image and would leave
+    // nobody to answer a caller.
+    //
+    // Treated as fatal: a service whose attestation nobody can fetch is a service
+    // no caller can verify, and launching it anyway would look like success while
+    // silently removing the guarantee.
+    if (attest_listen) {
+        char* vinfo = NULL;
+        if (dc_sig_path) {
+            vinfo = read_file_string(dc_sig_path);
+            if (!vinfo) {
+                fprintf(stderr, "tahini attest: cannot read --tahini-dc-sig %s\n", dc_sig_path);
+                free_enclave_quote(&eq);
+                return EXIT_FAILURE;
+            }
+        } else {
+            fprintf(stderr, "tahini attest: --tahini-attest-listen needs --tahini-dc-sig, "
+                            "otherwise the document carries no credential for the caller "
+                            "to verify the service with\n");
+            free_enclave_quote(&eq);
+            return EXIT_FAILURE;
+        }
+        int rc = tahini_serve_attestation(attest_listen, eq.quote, eq.quote_size,
+                                          binary_hash, TAHINI_HASH_SIZE, vinfo);
+        free(vinfo);
+        if (rc != 0) {
+            free_enclave_quote(&eq);
+            return EXIT_FAILURE;
+        }
     }
 
     free_enclave_quote(&eq);

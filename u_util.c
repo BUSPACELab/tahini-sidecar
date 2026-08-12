@@ -158,9 +158,9 @@ void free_enclave_quote(struct enclave_quote* quote) {
 static const char b64url_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-// base64url_encode encodes the given data into a base64url string. The joys of 
+// base64url_encode encodes the given data into a base64url string. The joys of
 // working in C where the standard library gives us essentially nothing.
-static char* base64url_encode(const uint8_t* data, size_t len, size_t* out_len) {
+char* base64url_encode(const uint8_t* data, size_t len, size_t* out_len) {
     size_t olen = 4 * ((len + 2) / 3);
     char* out = malloc(olen + 1);
     if (!out) return NULL;
@@ -224,6 +224,21 @@ int write_attestation_json(const char* path,
     free(quote_b64);
     fclose(f);
     return 0;
+}
+
+char* read_file_string(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long n = ftell(f);
+    if (n < 0) { fclose(f); return NULL; }
+    rewind(f);
+    char* buf = malloc((size_t)n + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[got] = '\0';
+    return buf;
 }
 
 int dump_file_to_stream(const char* path, FILE* stream) {
