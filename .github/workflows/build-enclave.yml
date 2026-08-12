@@ -125,3 +125,22 @@ jobs:
             echo "unexpected output from the launcher" >&2
             exit 1
           fi
+
+      # Publishing these removes the need to build on the deployment hosts, which
+      # was slow on a 1 vCPU confidential VM and — on one of ours — impossible,
+      # because bazel there hangs with no output at all. It also gives every tier
+      # the same enclave, so a verifier pins one measurement rather than one per
+      # machine that happened to build successfully.
+      - name: Package the launcher and enclave
+        run: |
+          set -euo pipefail
+          mkdir -p sidecar-dist
+          cp bazel-bin/sidecar bazel-bin/enclave.signed.so sidecar-dist/
+          chmod +x sidecar-dist/sidecar
+          sha256sum sidecar-dist/* | tee sidecar-dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-enclave
+          path: sidecar-dist/
+          retention-days: 5
