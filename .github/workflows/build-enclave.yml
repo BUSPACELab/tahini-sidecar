@@ -92,6 +92,26 @@ jobs:
           sudo ./sgx_linux_x64_sdk_2.27.100.1.bin --prefix /opt/intel
           rm -f sgx_linux_x64_sdk_2.27.100.1.bin
 
+      # Signing with a fixed key so MRSIGNER is stable and a verifier can pin it.
+      # Without this the build generates a key per run: two builds of the same
+      # commit were measured producing identical MRENCLAVE and different MRSIGNER.
+      #
+      # Secrets are not exposed to workflows from forked pull requests, so a public
+      # repo does not hand this to arbitrary contributors. It is still a trust
+      # anchor held in CI, which is appropriate for a research artifact and not for
+      # something production relies on — that wants an HSM and two-step signing,
+      # where the private key never reaches the build at all.
+      - name: Provide the enclave signing key
+        if: ${{ secrets.SIDECAR_SIGNING_KEY != '' }}
+        env:
+          SIGNING_KEY: ${{ secrets.SIDECAR_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/sidecar_signing.pem"
+          openssl rsa -in "$RUNNER_TEMP/sidecar_signing.pem" -noout -check >/dev/null
+          echo "TAHINI_SIGNING_KEY=$RUNNER_TEMP/sidecar_signing.pem" >> "$GITHUB_ENV"
+
       - name: Build the untrusted launcher and the signed enclave
         run: |
           set -eo pipefail
@@ -99,6 +119,11 @@ jobs:
           # sourcing it under `set -u` aborts with "unbound variable".
           source /opt/intel/sgxsdk/environment
           set -u
+          if [ -n "${TAHINI_SIGNING_KEY:-}" ]; then
+            echo "signing with the fixed key; MRSIGNER will be stable"
+          else
+            echo "::warning::no SIDECAR_SIGNING_KEY available; MRSIGNER will differ from released builds"
+          fi
           SGX_MODE=HW bazel build //:sidecar_bin //:enclave_signed //examples:hello
 
       - name: Show what was produced
@@ -138,6 +163,26 @@ jobs:
           cp bazel-bin/sidecar bazel-bin/enclave.signed.so sidecar-dist/
           chmod +x sidecar-dist/sidecar
           sha256sum sidecar-dist/* | tee sidecar-dist/SHA256SUMS
+
+          # The enclave's identities, recorded so a verifier can pin them without
+          # re-deriving them from the binary. MRENCLAVE is the code measurement and
+          # is reproducible across builds of the same commit; MRSIGNER identifies
+          # the key, and is stable only when one was supplied above.
+          source /opt/intel/sgxsdk/environment
+          sgx_sign dump -enclave sidecar-dist/enclave.signed.so \
+            -dumpfile "$RUNNER_TEMP/enclave-dump.txt" >/dev/null
+          mrenclave="$(awk '/enclave_hash.m/{found=1; next} found && /0x/{gsub(/[^0-9a-fx ]/,""); for(i=1;i<=NF;i++){gsub(/0x/,"",$i); printf "%s",$i}; if(++n==2) exit}' "$RUNNER_TEMP/enclave-dump.txt")"
+          {
+            echo "commit    ${{ github.sha }}"
+            echo "mrenclave ${mrenclave:-unknown}"
+            if [ -n "${TAHINI_SIGNING_KEY:-}" ]; then
+              echo "mrsigner  $(openssl rsa -in "$TAHINI_SIGNING_KEY" -noout -modulus \
+                | cut -d= -f2 \
+                | python3 -c 'import sys,hashlib; print(hashlib.sha256(bytes.fromhex(sys.stdin.read().strip())[::-1]).hexdigest())')"
+            else
+              echo "mrsigner  UNSTABLE (no signing key supplied; differs every build)"
+            fi
+          } | tee sidecar-dist/MEASUREMENTS
 
       - uses: actions/upload-artifact@v4
         with:

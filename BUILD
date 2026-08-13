@@ -105,8 +105,31 @@ genrule(
 genrule(
     name = "signing_key",
     outs = ["sidecar_private.pem"],
-    cmd = "openssl genrsa -out $@ -3 3072",
-    message = "Generating enclave signing key",
+    # A generated key gives the enclave a different MRSIGNER on every build, so
+    # nothing can pin who signed it. Two builds of the same commit were confirmed
+    # to produce identical MRENCLAVE and different MRSIGNER, which is exactly this.
+    #
+    # Point TAHINI_SIGNING_KEY at a PEM to sign with a fixed key and get a stable
+    # MRSIGNER. Generating one remains the default so a fresh clone builds without
+    # setup; that is fine for development, where the code identity is what matters,
+    # and not fine for anything a verifier is expected to trust.
+    #
+    # SGX requires RSA-3072 with public exponent 3:
+    #   openssl genrsa -out sidecar_private.pem -3 3072
+    cmd = """
+        set -e
+        if [ -n "$$TAHINI_SIGNING_KEY" ]; then
+            if [ ! -f "$$TAHINI_SIGNING_KEY" ]; then
+                echo "TAHINI_SIGNING_KEY=$$TAHINI_SIGNING_KEY does not exist" >&2
+                exit 1
+            fi
+            cp "$$TAHINI_SIGNING_KEY" $@
+        else
+            echo "note: no TAHINI_SIGNING_KEY; generating a throwaway key, MRSIGNER will not be stable" >&2
+            openssl genrsa -out $@ -3 3072
+        fi
+    """,
+    message = "Preparing enclave signing key",
 )
 
 # ---- Signed enclave (enclave.signed.so) ----
