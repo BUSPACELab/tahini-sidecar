@@ -173,22 +173,35 @@ jobs:
           # The enclave's identities, recorded so a verifier can pin them without
           # re-deriving them from the binary. MRENCLAVE is the code measurement and
           # is reproducible across builds of the same commit; MRSIGNER identifies
-          # the key, and is stable only when one was supplied above.
-          source /opt/intel/sgxsdk/environment
-          sgx_sign dump -enclave sidecar-dist/enclave.signed.so \
-            -dumpfile "$RUNNER_TEMP/enclave-dump.txt" >/dev/null
-          mrenclave="$(awk '/enclave_hash.m/{found=1; next} found && /0x/{gsub(/[^0-9a-fx ]/,""); for(i=1;i<=NF;i++){gsub(/0x/,"",$i); printf "%s",$i}; if(++n==2) exit}' "$RUNNER_TEMP/enclave-dump.txt")"
-          {
-            echo "commit    ${{ github.sha }}"
-            echo "mrenclave ${mrenclave:-unknown}"
-            if [ -n "${TAHINI_SIGNING_KEY:-}" ]; then
-              echo "mrsigner  $(openssl rsa -in "$TAHINI_SIGNING_KEY" -noout -modulus \
-                | cut -d= -f2 \
-                | python3 -c 'import sys,hashlib; print(hashlib.sha256(bytes.fromhex(sys.stdin.read().strip())[::-1]).hexdigest())')"
-            else
-              echo "mrsigner  UNSTABLE (no signing key supplied; differs every build)"
-            fi
-          } | tee sidecar-dist/MEASUREMENTS
+          # the signing key, and is stable only when one was supplied above.
+          #
+          # Read straight out of the SIGSTRUCT rather than via `sgx_sign dump`: that
+          # needs Intel's environment script, which reads PKG_CONFIG_PATH with no
+          # default and so cannot be sourced under `set -u` — a trap this repo has
+          # hit twice — and its text output is not a stable interface either.
+          python3 - <<'PY' | tee sidecar-dist/MEASUREMENTS
+          import hashlib
+          blob = open("sidecar-dist/enclave.signed.so", "rb").read()
+          HEADER  = bytes.fromhex("06000000e10000000000010000000000")
+          HEADER2 = bytes.fromhex("01010000600000006000000001000000")
+          off = -1
+          start = 0
+          while True:
+              i = blob.find(HEADER, start)
+              if i < 0:
+                  break
+              if blob[i + 24 : i + 40] == HEADER2:
+                  off = i
+                  break
+              start = i + 1
+          if off < 0:
+              raise SystemExit("no SIGSTRUCT found in the signed enclave")
+          modulus = blob[off + 128 : off + 512]
+          print("commit    ${{ github.sha }}")
+          print("mrenclave", blob[off + 960 : off + 992].hex())
+          print("mrsigner ", hashlib.sha256(modulus).hexdigest())
+          print("debug    ", bool(int.from_bytes(blob[off + 928 : off + 936], "little") & 0x2))
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
