@@ -33,10 +33,10 @@ static void* e_malloc_cpy(const void* src, size_t size) {
     }
     void* dest = (void*)mmap_result;
     if (src) {
-        const uint8_t* s = (const uint8_t*)src;
-        for (size_t i = 0; i < size; i++) {
-            ocall_copy_byte((char*)dest + i, s[i]);
-        }
+        // One transition for the whole buffer. Copying byte by byte here costs an
+        // enclave exit per byte, which is what made launching a multi-megabyte
+        // service take tens of seconds.
+        ocall_copy_buf(dest, (const uint8_t*)src, size);
     }
     return dest;
 }
@@ -145,9 +145,13 @@ sgx_status_t ecall_hash_binary(const char* binary_path, int* binary_fd) {
                 sgx_sha256_close(sha_handle);
                 return ret;
             }
-            for (size_t i = 0; i < bytes_read; i++) {
-                ocall_copy_byte((char*)write_buf + i, buffer[i]);
-            }
+            // The chunk leaves the enclave in a single transition. This loop used
+            // to call ocall_copy_byte per byte: at ~5 microseconds a transition it
+            // accounted for essentially all of startup, 39 s for a 7.8 MB binary and
+            // 35 s for a 6.9 MB one — the same rate per byte, which is what
+            // identified it. The bytes written are still the bytes hashed just
+            // above, so the TOCTOU property this function exists for is unchanged.
+            ocall_copy_buf(write_buf, buffer, bytes_read);
             long write_result;
             ocall_ret = ocall_syscall(&write_result, TAHINI_SYSCALL_WRITE, memfd_fd, (long)write_buf, bytes_read, 0, 0, 0);
             if (ocall_ret != SGX_SUCCESS || write_result != (long)bytes_read) {

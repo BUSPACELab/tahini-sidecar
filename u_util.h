@@ -44,6 +44,11 @@ long ocall_syscall(long syscall_number, long arg1, long arg2, long arg3, long ar
 // It is used to copy bytes from the enclave to the untrusted side.
 void ocall_copy_byte(void* dest, uint8_t byte);
 
+// ocall_copy_buf copies a whole buffer out of the enclave in one transition.
+// Preferred over calling ocall_copy_byte in a loop, which costs an enclave exit per
+// byte and made launching a 7.8 MB service take 39 seconds.
+void ocall_copy_buf(void* dest, const uint8_t* src, size_t len);
+
 // bin_to_hex converts len bytes of bin into a null-terminated hex string. hex must be at least len*2+1 bytes.
 void bin_to_hex(const uint8_t* bin, size_t len, char* hex);
 

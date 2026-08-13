@@ -52,5 +52,19 @@ enclave {
             [user_check] void* dest,
             uint8_t byte
         );
+
+        // Copies a whole buffer out in one transition.
+        //
+        // ocall_copy_byte above costs an enclave exit and re-entry per byte, which
+        // for a multi-megabyte service binary dominates startup entirely: two
+        // binaries measured 4.94 and 5.05 microseconds per byte, giving 39 s and
+        // 35 s to launch. Passing the buffer as [in, size=len] lets the edge
+        // routine marshal it in a single transition, so the cost scales with the
+        // number of chunks rather than the number of bytes.
+        void ocall_copy_buf(
+            [user_check] void* dest,
+            [in, size=len] const uint8_t* src,
+            size_t len
+        );
     };
 };

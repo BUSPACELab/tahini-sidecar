@@ -17,6 +17,10 @@ void ocall_copy_byte(void* dest, uint8_t byte) {
     *((char*)dest) = (char)byte;
 }
 
+void ocall_copy_buf(void* dest, const uint8_t* src, size_t len) {
+    if (dest && src && len) memcpy(dest, src, len);
+}
+
 void bin_to_hex(const uint8_t* bin, size_t len, char* hex) {
     const char hc[] = "0123456789abcdef";
     for (size_t i = 0; i < len; i++) {
