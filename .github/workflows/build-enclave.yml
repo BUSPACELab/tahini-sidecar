@@ -101,12 +101,18 @@ jobs:
       # anchor held in CI, which is appropriate for a research artifact and not for
       # something production relies on — that wants an HSM and two-step signing,
       # where the private key never reaches the build at all.
+      # The emptiness check is inside the step rather than in `if:`, because the
+      # secrets context is not available to a step-level condition — and neither is
+      # a step's own env, which is the other obvious guess.
       - name: Provide the enclave signing key
-        if: ${{ secrets.SIDECAR_SIGNING_KEY != '' }}
         env:
           SIGNING_KEY: ${{ secrets.SIDECAR_SIGNING_KEY }}
         run: |
           set -euo pipefail
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::warning::SIDECAR_SIGNING_KEY is not set; a throwaway key will be generated and MRSIGNER will differ from released builds"
+            exit 0
+          fi
           umask 077
           printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/sidecar_signing.pem"
           openssl rsa -in "$RUNNER_TEMP/sidecar_signing.pem" -noout -check >/dev/null
