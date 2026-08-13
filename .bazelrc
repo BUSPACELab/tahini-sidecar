@@ -2,6 +2,10 @@
 # SGX SDK path; set in env or when running in Docker (e.g. SGX_SDK=/opt/intel/sgxsdk).
 build --action_env=SGX_SDK
 build --action_env=SGX_MODE
+# Path to a fixed enclave signing key, so MRSIGNER is stable and pinnable. Declared
+# here because --incompatible_strict_action_env below scrubs anything undeclared,
+# so without this the genrule cannot see it however it is exported.
+build --action_env=TAHINI_SIGNING_KEY
 test --action_env=SGX_SDK
 test --action_env=SGX_MODE
 

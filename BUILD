@@ -118,12 +118,12 @@ genrule(
     #   openssl genrsa -out sidecar_private.pem -3 3072
     cmd = """
         set -e
-        if [ -n "$$TAHINI_SIGNING_KEY" ]; then
-            if [ ! -f "$$TAHINI_SIGNING_KEY" ]; then
-                echo "TAHINI_SIGNING_KEY=$$TAHINI_SIGNING_KEY does not exist" >&2
+        if [ -n "$${TAHINI_SIGNING_KEY:-}" ]; then
+            if [ ! -f "$${TAHINI_SIGNING_KEY:-}" ]; then
+                echo "TAHINI_SIGNING_KEY=$${TAHINI_SIGNING_KEY:-} does not exist" >&2
                 exit 1
             fi
-            cp "$$TAHINI_SIGNING_KEY" $@
+            cp "$${TAHINI_SIGNING_KEY:-}" $@
         else
             echo "note: no TAHINI_SIGNING_KEY; generating a throwaway key, MRSIGNER will not be stable" >&2
             openssl genrsa -out $@ -3 3072
