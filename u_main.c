@@ -86,8 +86,31 @@ int main(int argc, char* argv[]) {
     const char* enclave_path = getenv("TAHINI_ENCLAVE");
     if (!enclave_path) enclave_path = TAHINI_ENCLAVE_FILE_DEFAULT;
 
+    // Create the enclave in production mode.
+    //
+    // SGX_DEBUG_FLAG is 1 unless the launcher is compiled with NDEBUG, which this
+    // build does not define — so the enclave was being created debuggable even
+    // though it is signed as production. A debug enclave's memory can be read and
+    // written from the host, so everything the attestation is meant to establish
+    // about confidentiality is void. Azure Attestation reports it as
+    // x-ms-sgx-is-debuggable and a verifier that checks that claim refuses the
+    // quote, which is how this was found.
+    //
+    // TAHINI_ENCLAVE_DEBUG=1 restores the debuggable enclave for development, where
+    // being able to attach a debugger is worth more than a meaningful quote. It
+    // warns, because a quote from a debug enclave looks exactly like a good one to
+    // anyone not checking that claim.
+    int enclave_debug = 0;
+    const char* debug_env = getenv("TAHINI_ENCLAVE_DEBUG");
+    if (debug_env && debug_env[0] == '1') {
+        enclave_debug = 1;
+        fprintf(stderr, "tahini warning: TAHINI_ENCLAVE_DEBUG=1, creating a debuggable "
+                        "enclave; its memory is readable from the host and a verifier "
+                        "checking x-ms-sgx-is-debuggable will reject the quote\n");
+    }
+
     sgx_enclave_id_t eid = 0;
-    sgx_status_t ret = sgx_create_enclave(enclave_path, SGX_DEBUG_FLAG, NULL, NULL, &eid, NULL);
+    sgx_status_t ret = sgx_create_enclave(enclave_path, enclave_debug, NULL, NULL, &eid, NULL);
     if (ret != SGX_SUCCESS) {
         fprintf(stderr, "failed to create enclave (0x%x)\n", ret);
         return EXIT_FAILURE;
